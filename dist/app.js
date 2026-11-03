@@ -413,7 +413,7 @@ async function saveCompanySettings() {
   const color=$('input[type=color]',article)?.value||'#5267e8';
   const name=$('input',article)?.value?.trim()||currentCompany.name;
   const {data,error}=await db.from('companies').update({name,primary_color:color}).eq('id',currentCompany.id).select().single();
-  if(error){applyCompanyTheme(currentCompany.primary_color);toast(errorText(error),'Configuración no guardada');return;}
+  if(error){applyCompanyTheme(currentCompany.primary_color);const colorInput=$('input[type=color]',article);if(colorInput)colorInput.value=currentCompany.primary_color||'#5267e8';toast(errorText(error),'Configuración no guardada');return;}
   Object.assign(currentCompany,data);renderCompanyPicker();toast('Nombre y color guardados.');
 }
 async function uploadLogo(e) {
