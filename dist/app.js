@@ -148,6 +148,20 @@ function showOnboarding() {
   form.addEventListener('submit',async e=>{e.preventDefault();try{await makeFirstCompany($('#onboardingCompany').value.trim());await loadMemberships();}catch(err){$('#authError').textContent=errorText(err);}});
   $('#authSwitch').hidden=true;$('#forgotPassword').hidden=true;$('#firstCompanyField').hidden=true;$('#authError').textContent='';
 }
+function mixColor(hex,target,weight) {
+  const from=hex.match(/[\da-f]{2}/ig)||['52','67','e8'],to=target.match(/[\da-f]{2}/ig)||['ff','ff','ff'];
+  return '#'+from.slice(0,3).map((v,i)=>Math.round(parseInt(v,16)*(1-weight)+parseInt(to[i],16)*weight).toString(16).padStart(2,'0')).join('');
+}
+function applyCompanyTheme(color) {
+  const accent=/^#[0-9a-fA-F]{6}$/.test(color||'')?color:'#5267e8',root=document.documentElement;
+  root.style.setProperty('--accent',accent);
+  root.style.setProperty('--accent-soft',mixColor(accent,'#ffffff',.91));
+  root.style.setProperty('--accent-border',mixColor(accent,'#ffffff',.74));
+  root.style.setProperty('--accent-gradient-start',mixColor(accent,'#ffffff',.3));
+  root.style.setProperty('--accent-hover',mixColor(accent,'#000000',.12));
+  const rgb=accent.slice(1).match(/.{2}/g).map(x=>parseInt(x,16)).join(',');
+  root.style.setProperty('--accent-shadow',`rgba(${rgb},.32)`);
+}
 function renderCompanyPicker() {
   const old=$('.company-select');if(!old)return;
   const select=document.createElement('label');select.className='company-select';
@@ -155,7 +169,7 @@ function renderCompanyPicker() {
   old.replaceWith(select);
   $('#companySwitch').innerHTML=companies.map(c=>`<option value="${c.id}" ${c.id===currentCompany.id?'selected':''}>${esc(c.name)}</option>`).join('');
   $('#companySwitch').addEventListener('change',async e=>{currentCompany=companies.find(c=>c.id===e.target.value);await loadCompanyData();});
-  document.documentElement.style.setProperty('--accent',currentCompany.primary_color||'#5267e8');
+  applyCompanyTheme(currentCompany.primary_color);
 }
 async function fetchAllNotices(companyId) {
   const all=[];let from=0;const batch=1000;
@@ -164,6 +178,7 @@ async function fetchAllNotices(companyId) {
 }
 async function loadCompanyData() {
   if(!currentCompany)return;
+  applyCompanyTheme(currentCompany.primary_color);
   document.title=currentCompany.name+' · CRM Servicio Técnico';
   try {
     const c=currentCompany.id;
@@ -381,10 +396,10 @@ function showSettingsTab(name) {
 }
 async function renderSettings() {
   if(!currentCompany)return;
-  const article=$('#page-configuracion .simple-grid article');
+  const article=$('#brandPanel');
   if(article) {
     const input=$('input[value="Global Técnicos"]',article)||$('input',article); if(input)input.value=currentCompany.name;
-    const color=$('input[type=color]',article);if(color)color.value=currentCompany.primary_color||'#5267e8';
+    const color=$('input[type=color]',article);if(color){color.value=currentCompany.primary_color||'#5267e8';color.oninput=()=>applyCompanyTheme(color.value);}
     if(currentCompany.logo_path&&$('.company-logo',article)==null){const img=document.createElement('img');img.src=currentCompany.logo_path;img.className='company-logo';img.style='max-width:140px;max-height:60px;display:block;margin:10px 0';article.append(img);}
     let file=$('#logoFile',article),button=$('#uploadLogo',article);
     if(!file){file=document.createElement('input');file.type='file';file.accept='image/png,image/jpeg,image/webp,image/svg+xml';file.id='logoFile';file.style='position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none';file.setAttribute('aria-label','Seleccionar archivo de logo');article.append(file);}
@@ -394,11 +409,11 @@ async function renderSettings() {
   renderFields();renderPriceRules();
 }
 async function saveCompanySettings() {
-  const article=$('#page-configuracion .simple-grid article');
+  const article=$('#brandPanel');
   const color=$('input[type=color]',article)?.value||'#5267e8';
   const name=$('input',article)?.value?.trim()||currentCompany.name;
   const {data,error}=await db.from('companies').update({name,primary_color:color}).eq('id',currentCompany.id).select().single();
-  if(error){toast(errorText(error),'Configuración no guardada');return;}
+  if(error){applyCompanyTheme(currentCompany.primary_color);toast(errorText(error),'Configuración no guardada');return;}
   Object.assign(currentCompany,data);renderCompanyPicker();toast('Nombre y color guardados.');
 }
 async function uploadLogo(e) {
@@ -441,11 +456,12 @@ async function renderIntegrations() {
   const section=$('#page-integraciones');if(!section)return;
   const old=$('.demo-banner',section);if(old)old.remove();
   const grid=$('.simple-grid',section);if(!grid)return;
-  grid.innerHTML=`<article class="card simple-card"><div class="metric-icon">⌘</div><h2>Formularios web</h2><p>Conecta una landing y copia su endpoint y código de envío.</p><button class="outline-btn" id="addLanding" style="margin-top:10px">＋ Añadir landing</button><div id="landingIntegrations" style="display:grid;gap:12px;margin-top:14px"></div></article><article class="card simple-card"><div class="metric-icon" style="background:#e7f4ff;color:#2685c5">➤</div><h2>Telegram</h2><p>Notifica la llegada de avisos en el chat de la empresa.</p><div class="button-row"><button class="outline-btn" id="setupTelegram">Configurar Telegram</button><button class="outline-btn" id="testTelegram">Enviar prueba</button></div></article><article class="card simple-card"><div class="metric-icon amber">✉</div><h2>Correo electrónico</h2><p>Envía avisos a las direcciones que elijas mediante Resend.</p><div class="button-row"><button class="outline-btn" id="setupEmail">Configurar correo</button><button class="outline-btn" id="testEmail">Enviar prueba</button></div></article>`;
+  grid.innerHTML=`<article class="card simple-card"><div class="metric-icon">⌘</div><h2>Formularios web</h2><p>Conecta una landing y copia su endpoint y código de envío.</p><button class="outline-btn" id="addLanding" style="margin-top:10px">＋ Añadir landing</button><div id="landingIntegrations" style="display:grid;gap:12px;margin-top:14px"></div></article><article class="card simple-card"><div class="metric-icon" style="background:#e7f4ff;color:#2685c5">➤</div><h2>Telegram</h2><p>Notifica la llegada de avisos en el chat de la empresa.</p><div class="button-row"><button class="outline-btn" id="setupTelegram">Configurar Telegram</button><button class="outline-btn" id="testTelegram">Enviar prueba</button></div></article><article class="card simple-card"><div class="metric-icon" style="background:#e7f8ef;color:#16844b">◉</div><h2>WhatsApp</h2><p>Recibe avisos con WhatsApp Business de Meta. Configuración guiada, sin programar.</p><div class="button-row"><button class="outline-btn" id="setupWhatsapp">Configurar WhatsApp</button><button class="outline-btn" id="testWhatsapp">Enviar prueba</button></div></article><article class="card simple-card"><div class="metric-icon amber">✉</div><h2>Correo electrónico</h2><p>Envía avisos a las direcciones que elijas mediante Resend.</p><div class="button-row"><button class="outline-btn" id="setupEmail">Configurar correo</button><button class="outline-btn" id="testEmail">Enviar prueba</button></div></article>`;
   $('#addLanding').onclick=async()=>{const answer=await formDialog({title:'Añadir landing',description:'Conecta un formulario web a esta empresa.',fields:[{key:'name',label:'Nombre de la landing',required:true},{key:'url',label:'URL de la landing',placeholder:'https://ejemplo.com'},{key:'domains',label:'Orígenes permitidos (separados por comas)',placeholder:'https://ejemplo.com'}]});if(!answer?.name.trim())return;const name=answer.name,url=answer.url.trim()||null,domains=answer.domains||'';const allowed_origins=domains.split(',').map(x=>x.trim()).filter(Boolean);const {data,error}=await db.from('landings').insert({company_id:currentCompany.id,name:name.trim(),url,allowed_origins}).select().single();if(error){toast(errorText(error),'No se pudo crear la landing');return;}landings.push(data);landings.sort((a,b)=>a.name.localeCompare(b.name));await loadCompanyData();showLandingCode(data);};
   $('#setupTelegram').onclick=()=>configureIntegration('telegram');
   $('#setupEmail').onclick=()=>configureIntegration('email');
-  $('#testTelegram').onclick=()=>testIntegration('telegram');$('#testEmail').onclick=()=>testIntegration('email');
+  $('#setupWhatsapp').onclick=()=>configureIntegration('whatsapp');
+  $('#testTelegram').onclick=()=>testIntegration('telegram');$('#testEmail').onclick=()=>testIntegration('email');$('#testWhatsapp').onclick=()=>testIntegration('whatsapp');
   const host=$('#landingIntegrations');
   host.innerHTML=landings.map(l=>`<div class="placeholder-tile"><strong>${esc(l.name)}${l.is_active?'':' · Inactiva'}</strong><small>${esc(l.url||'Sin URL guardada')}</small><div class="button-row"><button class="outline-btn" data-code="${l.id}">Ver conexión</button><button class="mini-delete" data-delete-landing="${l.id}" aria-label="Desactivar landing">×</button></div></div>`).join('')||'<div class="empty">Todavía no hay landings conectadas.</div>';
   $$('[data-code]',host).forEach(b=>b.onclick=()=>showLandingCode(landings.find(l=>l.id===b.dataset.code)));
@@ -456,6 +472,9 @@ async function configureIntegration(kind) {
   if(kind==='telegram') {
     const answer=await formDialog({title:'Configurar Telegram',description:'Introduce los datos del bot y el chat de destino.',fields:[{key:'bot_token',label:'Token del bot',type:'password',required:true},{key:'chat_id',label:'ID del chat o grupo',required:true}]});
     if(!answer)return;config=answer;
+  } else if(kind==='whatsapp') {
+    const answer=await formDialog({title:'Configurar WhatsApp Business',description:'Necesitas tu token y el ID del número de WhatsApp de Meta, un número de destino con prefijo de país y una plantilla de mensaje aprobada. Sin programación: el CRM rellena automáticamente 5 variables en este orden: landing, hora, cliente, teléfono y aparato.',fields:[{key:'access_token',label:'Token de acceso de Meta',type:'password',required:true},{key:'phone_number_id',label:'ID del número de WhatsApp',required:true},{key:'to',label:'Número que recibirá los avisos (con prefijo de país)',placeholder:'34600111222',required:true},{key:'template_name',label:'Nombre de la plantilla aprobada',placeholder:'aviso_nuevo',required:true},{key:'language',label:'Idioma de la plantilla',placeholder:'es',value:'es',required:true}]});
+    if(!answer)return;config={...answer,to:answer.to.replace(/\D/g,'')};
   } else {
     const answer=await formDialog({title:'Configurar correo',description:'Datos del servicio de envío Resend.',fields:[{key:'api_key',label:'API key de Resend',type:'password',required:true},{key:'from',label:'Remitente verificado',placeholder:'CRM <avisos@dominio.com>',required:true},{key:'to',label:'Correos destinatarios (separados por comas)',type:'textarea',required:true}]});
     if(!answer)return;config={...answer,to:answer.to.split(',').map(x=>x.trim()).filter(Boolean)};
