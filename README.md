@@ -1,11 +1,14 @@
 # CRM Servicio Técnico
 
-Proyecto independiente de CRM Globaltec Marketing.
+CRM independiente para la gestión de avisos de reparación. Usa un proyecto Supabase separado del CRM Globaltec Marketing.
 
 ## Publicación
-El flujo de GitHub Actions publica el contenido de `dist/` en GitHub Pages al actualizar la rama `main`.
+GitHub Actions publica `dist/` en GitHub Pages al actualizar `main`.
 
-## Estado actual
-Esta versión es una demostración visual con datos de ejemplo. La configuración se guarda en el navegador. Aún no tiene base de datos, autenticación multiempresa, recepción real de formularios ni conexiones reales con Telegram o correo.
+## Backend
+El esquema está en `supabase/migrations/`. Las funciones Edge reciben formularios públicos mediante `service-form` y envían invitaciones y notificaciones.
 
-No introducir datos personales o avisos reales en esta versión.
+La aplicación usa una clave publishable en `dist/supabase-config.js`. Esta clave es pública y la base de datos aplica políticas RLS por empresa. No guardes claves de servicio en los archivos del navegador.
+
+## Integraciones
+Cada empresa configura sus landings, tarifas y campos. Telegram y correo se guardan cifrados desde funciones Edge; el correo usa Resend y requiere una clave y remitente verificado.

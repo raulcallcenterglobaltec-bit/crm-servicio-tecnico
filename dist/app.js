@@ -1,247 +1,457 @@
-const localDate = (offset = 0) => {
-  const d = new Date();
-  d.setHours(12, 0, 0, 0);
-  d.setDate(d.getDate() + offset);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
-const dateLabel = (date, time) => date === localDate() ? `Hoy, ${time}` : date === localDate(-1) ? `Ayer, ${time}` : `${date.split('-').reverse().join('/')}, ${time}`;
-const landingNames = ['La Terreta Asistencia', 'Formentor Reparaciones', 'Confort Clima Madrid', 'TecniLlar Barcelona'];
-const deviceNames = ['Aire acondicionado', 'Lavadora', 'Lavavajillas', 'Secadora', 'Termo eléctrico', 'Caldera'];
-const categoryNames = ['Gama blanca', 'Clima'];
-let notices = [
-  {name:'Cliente de prueba 01',phone:'600 111 201',device:'Aire acondicionado',landing:landingNames[0],date:localDate(),time:dateLabel(localDate(),'09:42'),status:'Nuevo'},
-  {name:'Cliente de prueba 02',phone:'600 111 202',device:'Lavadora',landing:landingNames[2],date:localDate(),time:dateLabel(localDate(),'09:18'),status:'Sale'},
-  {name:'Cliente de prueba 03',phone:'600 111 203',device:'Termo eléctrico',landing:landingNames[1],date:localDate(),time:dateLabel(localDate(),'08:56'),status:'No sale'},
-  {name:'Cliente de prueba 04',phone:'600 111 204',device:'Lavavajillas',landing:landingNames[3],date:localDate(-1),time:dateLabel(localDate(-1),'18:33'),status:'Sale'},
-  {name:'Cliente de prueba 05',phone:'600 111 205',device:'Secadora',landing:landingNames[0],date:localDate(-1),time:dateLabel(localDate(-1),'17:05'),status:'Nuevo'},
-  {name:'Cliente de prueba 06',phone:'600 111 206',device:'Aire acondicionado',landing:landingNames[1],date:localDate(-1),time:dateLabel(localDate(-1),'16:41'),status:'No sale'}
+const CFG = window.CRM_SUPABASE_CONFIG || {};
+const hasBackend = !!(CFG.url && CFG.publishableKey && window.supabase?.createClient);
+const db = hasBackend ? window.supabase.createClient(CFG.url, CFG.publishableKey, {auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}}) : null;
+const $ = (s, root=document) => root.querySelector(s);
+const $$ = (s, root=document) => [...root.querySelectorAll(s)];
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = value => Number(value || 0).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
+const categoryFor = device => /aire acondicionado|aerotermia|bomba de calor|acs|caldera|calentador|termo/i.test(String(device||'')) ? 'Clima' : (device ? 'Gama blanca' : null);
+let user=null, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null;
+let authMode='login', selectedDate=new Date().toISOString().slice(0,10);
+const defaultFields=[
+  {field_key:'customer_name',label:'Nombre y apellidos',field_type:'text',required:true,visible_in_form:true,visible_in_table:true,position:1},
+  {field_key:'phone',label:'Teléfono',field_type:'phone',required:true,visible_in_form:true,visible_in_table:true,position:2},
+  {field_key:'locality',label:'Localidad',field_type:'text',required:false,visible_in_form:true,visible_in_table:false,position:3},
+  {field_key:'postal_code',label:'Código postal',field_type:'text',required:false,visible_in_form:true,visible_in_table:false,position:4},
+  {field_key:'device',label:'Aparato',field_type:'select',required:true,visible_in_form:true,visible_in_table:true,options:['Aire acondicionado','Caldera','Calentador de gas','Termo eléctrico','Lavadora','Lavavajillas','Frigorífico','Secadora','Horno','Otro'],position:5},
+  {field_key:'brand',label:'Marca del aparato',field_type:'text',required:false,visible_in_form:true,visible_in_table:false,position:6},
+  {field_key:'issue',label:'Avería o comentario',field_type:'textarea',required:false,visible_in_form:true,visible_in_table:false,position:7}
 ];
-let priceRules = [
-  {landing:landingNames[0],category:'Clima',price:90},
-  {landing:landingNames[0],category:'Gama blanca',price:75},
-  {landing:landingNames[1],category:'Clima',price:100},
-  {landing:landingNames[1],category:'Gama blanca',price:85},
-  {landing:landingNames[2],category:'Clima',price:120},
-  {landing:landingNames[2],category:'Gama blanca',price:75},
-  {landing:landingNames[3],category:'Clima',price:95},
-  {landing:landingNames[3],category:'Gama blanca',price:80}
-];
-let fields = [
-  {name:'Nombre y apellidos',type:'Texto',code:'name',enabled:true,custom:false},
-  {name:'Teléfono',type:'Teléfono',code:'phone',enabled:true,custom:false},
-  {name:'Localidad',type:'Texto',code:'locality',enabled:true,custom:false},
-  {name:'Código postal',type:'Texto',code:'postal',enabled:true,custom:false},
-  {name:'Aparato',type:'Lista',code:'device',enabled:true,custom:false},
-  {name:'Marca del aparato',type:'Texto',code:'brand',enabled:true,custom:false},
-  {name:'Avería',type:'Texto',code:'issue',enabled:true,custom:false}
-];
-try {
-  const saved = JSON.parse(localStorage.getItem('crm-st-demo-config') || '{}');
-  if (Array.isArray(saved.priceRules)) {
-    if (saved.priceRules.every(rule => rule.category)) priceRules = saved.priceRules;
-    else {
-      const migrated=new Map();
-      saved.priceRules.forEach(rule=>{const category=rule.category||deviceCategory(rule.device||'');if(category)migrated.set(`${rule.landing}|${category}`,Number(rule.price)||0);});
-      priceRules=priceRules.map(rule=>({...rule,price:migrated.get(`${rule.landing}|${rule.category}`)??rule.price}));
-    }
-  }
-  if (Array.isArray(saved.fields)) fields = saved.fields;
-} catch {}
-const persistConfig = () => localStorage.setItem('crm-st-demo-config', JSON.stringify({priceRules, fields}));
-const escapeHtml = s => String(s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-const tbody = document.getElementById('noticeRows');
-
-function statusClass(s) { return s === 'Sale' ? 'sold' : s === 'No sale' ? 'lost' : s === 'Nuevo' ? 'new' : 'pending'; }
-function getPrice(landing, device) {
-  const category = deviceCategory(device);
-  const rule = priceRules.find(r => r.landing === landing && r.category === category);
-  return rule ? `${Number(rule.price).toLocaleString('es-ES')} €` : '—';
+function toast(message, title='Aviso') {
+  const el=$('#toast'); if(!el) return;
+  el.querySelector('strong').textContent=title; el.querySelector('p').textContent=message;
+  el.classList.add('show'); clearTimeout(window.toastTimer); window.toastTimer=setTimeout(()=>el.classList.remove('show'),5200);
 }
-function deviceCategory(device) {
-  const value=String(device).toLocaleLowerCase('es-ES');
-  if(['aire acondicionado','aerotermia','bomba de calor','acs','caldera','calentador de gas','termo eléctrico'].some(item=>value.includes(item))) return 'Clima';
-  if(value==='otro') return null;
-  return 'Gama blanca';
+function errorText(error) { return error?.message || error?.details || String(error || 'Error desconocido'); }
+function formatDate(iso) { return new Date(iso).toLocaleString('es-ES',{dateStyle:'short',timeStyle:'short'}); }
+function dateOnly(iso) { return new Date(iso).toLocaleDateString('en-CA'); }
+function openAuth() {
+  if($('#authScreen')) return;
+  const style=document.createElement('style');
+  style.textContent=`.auth-screen{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:linear-gradient(135deg,#eef1ff,#f8f9fc 55%,#e9f5f1);padding:18px}.auth-card{width:min(440px,100%);background:white;border:1px solid #e4e8f1;border-radius:18px;box-shadow:0 24px 70px #1a26431a;padding:30px}.auth-mark{width:44px;height:44px;border-radius:13px;display:grid;place-items:center;color:white;font-size:20px;font-weight:800;background:linear-gradient(145deg,#7382ff,#5267e8);margin-bottom:18px}.auth-card h1{margin:0 0 7px;font-size:24px;color:#182235}.auth-card p{margin:0 0 20px;color:#788397;font-size:13px}.auth-card form{display:grid;gap:12px}.auth-card label{display:grid;gap:6px;color:#58647a;font-size:12px;font-weight:600}.auth-card input{height:42px;border:1px solid #dfe3ec;border-radius:8px;padding:0 12px;font:inherit}.auth-actions{display:flex;align-items:center;justify-content:space-between;margin-top:16px}.auth-actions button{border:0;background:none;color:#5267e8;font-weight:650;cursor:pointer}.auth-error{min-height:18px;color:#bf4257;font-size:12px;margin-top:11px}.auth-muted{font-size:11px;color:#8893a6;margin-top:14px;line-height:1.5}.auth-screen .primary-btn{height:42px;font-size:13px}.user{gap:7px}.signout-btn{border:1px solid var(--line);background:#fff;color:#657186;border-radius:8px;padding:7px 9px;font-size:11px}.company-select select{border:0;background:transparent;color:#334057;font:inherit;max-width:180px;outline:none}.integration-code{white-space:pre-wrap;word-break:break-all;background:#f5f6fa;border:1px solid #e3e7ef;border-radius:8px;padding:11px;font:11px/1.5 ui-monospace,monospace;color:#48546a}.danger-text{color:#be4357}.button-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.field-row{gap:10px}.company-select{cursor:pointer}`;
+  document.head.append(style);
+  const screen=document.createElement('div');screen.className='auth-screen';screen.id='authScreen';
+  screen.innerHTML=`<section class="auth-card"><div class="auth-mark">S</div><h1>CRM Servicio Técnico</h1><p id="authIntro">Accede a los avisos y la configuración de tu empresa.</p><form id="authForm"><label>Correo electrónico<input id="authEmail" type="email" autocomplete="email" required placeholder="nombre@empresa.com"/></label><label>Contraseña<input id="authPassword" type="password" autocomplete="current-password" minlength="8" required placeholder="Mínimo 8 caracteres"/></label><label id="firstCompanyField" hidden>Nombre de la primera empresa<input id="firstCompany" maxlength="120" placeholder="Ej. Global Técnicos"/></label><button class="primary-btn" id="authSubmit" type="submit">Entrar</button></form><div class="auth-error" id="authError" role="status" aria-live="polite"></div><div class="auth-actions"><button id="authSwitch" type="button">Crear cuenta</button><button id="forgotPassword" type="button">He olvidado la contraseña</button></div><div class="auth-muted" id="authNote">Cada empresa y sus avisos quedan aislados por permisos de base de datos.</div></section>`;
+  document.body.append(screen);
+  $('#authForm').addEventListener('submit',handleAuth);
+  $('#authSwitch').addEventListener('click',()=>setAuthMode(authMode==='login'?'signup':'login'));
+  $('#forgotPassword').addEventListener('click',resetPassword);
+  if(!hasBackend) {
+    $('#authIntro').textContent='La conexión segura con la base de datos independiente está pendiente de activación.';
+    $('#authError').textContent='El panel ya está publicado. Estoy preparando el proyecto de datos y el acceso.';
+    $('#authSubmit').disabled=true; $('#authSwitch').hidden=true; $('#forgotPassword').hidden=true;
+    $('#authNote').textContent='No introduzcas avisos reales hasta que la conexión quede activada.';
+  }
+}
+function setAuthMode(mode) {
+  authMode=mode;
+  $('#authError').textContent='';
+  $('#authIntro').textContent=mode==='login'?'Accede a los avisos y la configuración de tu empresa.':'Crea tu acceso y registra la primera empresa.';
+  $('#authSubmit').textContent=mode==='login'?'Entrar':'Crear cuenta';
+  $('#authSwitch').textContent=mode==='login'?'Crear cuenta':'Ya tengo cuenta';
+  $('#forgotPassword').hidden=mode!=='login';
+  $('#firstCompanyField').hidden=mode!=='signup';
+  $('#authPassword').autocomplete=mode==='login'?'current-password':'new-password';
+}
+async function handleAuth(event) {
+  event.preventDefault(); if(!db)return;
+  const email=$('#authEmail').value.trim(), password=$('#authPassword').value, message=$('#authError');
+  message.textContent='Conectando…'; $('#authSubmit').disabled=true;
+  try {
+    if(authMode==='login') {
+      const {error}=await db.auth.signInWithPassword({email,password}); if(error)throw error;
+      message.textContent='Acceso correcto.';
+    } else {
+      const companyName=$('#firstCompany').value.trim(); if(companyName.length<2)throw new Error('Escribe el nombre de la primera empresa.');
+      localStorage.setItem('crm-service-first-company',companyName);
+      const {data,error}=await db.auth.signUp({email,password});
+      if(error)throw error;
+      if(data.session) {
+        await makeFirstCompany(companyName);
+        message.textContent='Cuenta creada.';
+      } else {
+        message.textContent='Te enviamos un correo para confirmar la cuenta. Después vuelve aquí e inicia sesión.';
+      }
+    }
+  } catch(error) { message.textContent=errorText(error); }
+  finally { $('#authSubmit').disabled=false; }
+}
+async function resetPassword() {
+  if(!db)return;
+  const email=$('#authEmail').value.trim(); if(!email){$('#authError').textContent='Escribe primero tu correo electrónico.';return;}
+  const {error}=await db.auth.resetPasswordForEmail(email);
+  $('#authError').textContent=error?errorText(error):'Si el correo existe, recibirás instrucciones para restablecer la contraseña.';
+}
+async function makeFirstCompany(name) {
+  const {error}=await db.rpc('create_company_for_self',{company_name:name}); if(error)throw error;
+  localStorage.removeItem('crm-service-first-company');
+}
+function mountSignOut() {
+  const userMeta=$('.user-meta'); if(!userMeta)return;
+  userMeta.querySelector('strong').textContent=user?.email||'Usuario';
+  userMeta.querySelector('span').textContent=members.find(m=>m.user_id===user?.id)?.role||'Usuario';
+  if(!$('#signOut')) { const b=document.createElement('button');b.id='signOut';b.className='signout-btn';b.textContent='Salir';$('.top-actions').append(b);b.addEventListener('click',async()=>{await db.auth.signOut();location.reload();}); }
+}
+async function loadMemberships() {
+  const {data,error}=await db.from('company_members').select('company_id,user_id,email,role').eq('user_id',user.id);
+  if(error)throw error; members=data||[];
+  const ids=[...new Set(members.map(m=>m.company_id))];
+  if(!ids.length) {
+    const pending=localStorage.getItem('crm-service-first-company');
+    if(pending){await makeFirstCompany(pending);return loadMemberships();}
+    showOnboarding(); return;
+  }
+  const {data:rows,error:companyError}=await db.from('companies').select('*').in('id',ids).order('created_at');
+  if(companyError)throw companyError;
+  companies=rows||[];
+  if(!companies.length){showOnboarding();return;}
+  currentCompany=companies.find(c=>c.id===currentCompany?.id)||companies[0];
+  $('#authScreen')?.remove();
+  mountSignOut(); renderCompanyPicker(); await loadCompanyData();
+}
+function showOnboarding() {
+  $('#authIntro').textContent='Tu usuario todavía no está asociado a una empresa. Crea la primera para empezar.';
+  const oldForm=$('#authForm'), form=oldForm.cloneNode(false);oldForm.replaceWith(form);
+  form.innerHTML=`<label>Nombre de la empresa<input id="onboardingCompany" maxlength="120" required placeholder="Ej. Global Técnicos"/></label><button class="primary-btn" id="createFirstCompany" type="submit">Crear empresa</button>`;
+  form.addEventListener('submit',async e=>{e.preventDefault();try{await makeFirstCompany($('#onboardingCompany').value.trim());await loadMemberships();}catch(err){$('#authError').textContent=errorText(err);}});
+  $('#authSwitch').hidden=true;$('#forgotPassword').hidden=true;$('#firstCompanyField').hidden=true;$('#authError').textContent='';
+}
+function renderCompanyPicker() {
+  const old=$('.company-select');if(!old)return;
+  const select=document.createElement('label');select.className='company-select';
+  select.innerHTML=`<span class="company-badge">${esc((currentCompany.name||'GT').slice(0,2).toUpperCase())}</span><select id="companySwitch" aria-label="Empresa"></select>`;
+  old.replaceWith(select);
+  $('#companySwitch').innerHTML=companies.map(c=>`<option value="${c.id}" ${c.id===currentCompany.id?'selected':''}>${esc(c.name)}</option>`).join('');
+  $('#companySwitch').addEventListener('change',async e=>{currentCompany=companies.find(c=>c.id===e.target.value);await loadCompanyData();});
+  $('#companyName').textContent=currentCompany.name;
+  document.documentElement.style.setProperty('--accent',currentCompany.primary_color||'#5267e8');
+}
+async function fetchAllNotices(companyId) {
+  const all=[];let from=0;const batch=1000;
+  while(true){const {data,error}=await db.from('notices').select('*').eq('company_id',companyId).order('received_at',{ascending:false}).range(from,from+batch-1);if(error)throw error;all.push(...(data||[]));if(!data||data.length<batch)break;from+=batch;}
+  return {data:all,error:null};
+}
+async function loadCompanyData() {
+  if(!currentCompany)return;
+  $('#companyName').textContent=currentCompany.name;
+  document.title=currentCompany.name+' · CRM Servicio Técnico';
+  try {
+    const c=currentCompany.id;
+    const results=await Promise.all([
+      db.from('landings').select('*').eq('company_id',c).order('name'),
+      fetchAllNotices(c),
+      db.from('tariffs').select('*').eq('company_id',c),
+      db.from('notice_fields').select('*').eq('company_id',c).order('position'),
+      db.from('company_members').select('company_id,user_id,email,role').eq('company_id',c).order('email')
+    ]);
+    for(const r of results)if(r.error)throw r.error;
+    [landings,notices,tariffs,fields,members]=results.map(r=>r.data||[]);
+    if(!fields.length){const seeds=defaultFields.map(f=>({...f,company_id:c}));const {data:createdFields,error}=await db.from('notice_fields').insert(seeds).select();if(error)throw error;fields=createdFields||[];}
+    if(!realtimeChannel){realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();toast(`Landing: ${landingName(payload.new.landing_id)} · ${payload.new.device||'Nuevo aviso'}`,'Nuevo aviso recibido');}}).subscribe();}
+    else {await db.removeChannel(realtimeChannel);realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();toast(`Landing: ${landingName(payload.new.landing_id)} · ${payload.new.device||'Nuevo aviso'}`,'Nuevo aviso recibido');}}).subscribe();}
+    $$('.demo-banner').forEach(el=>el.remove());
+    renderLandingOptions();renderRows();renderReport();renderFields();renderPriceRules();renderCompanyPage();renderMembers();renderIntegrations();renderSettings();
+    mountSignOut();
+  } catch(error) { toast('No se pudieron cargar los datos: '+errorText(error),'Error de conexión'); }
+}
+function landingName(id) { return landings.find(l=>l.id===id)?.name||'Entrada manual'; }
+function landingOptions(selected='') { return '<option value="">Sin landing</option>'+landings.filter(l=>l.is_active).map(l=>`<option value="${l.id}" ${selected===l.id?'selected':''}>${esc(l.name)}</option>`).join(''); }
+function renderLandingOptions() {
+  const filters=$('#landingFilter');if(filters)filters.innerHTML='<option value="all">Todas las landings</option>'+landings.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');
+  const form=$('#fLanding');if(form)form.innerHTML=landingOptions(form.value);
+  const fieldLanding=$('#newFieldLanding');if(fieldLanding){const chosen=fieldLanding.value;fieldLanding.innerHTML='<option value="">Todas las landings</option>'+landings.filter(l=>l.is_active).map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');fieldLanding.value=chosen;}
+}
+function statusClass(s) { return s==='Sale'?'sold':s==='No sale'?'lost':'new'; }
+function getUnitPrice(n) {
+  if(n.status==='Sale')return Number(n.unit_price||0);
+  const t=tariffs.find(x=>x.landing_id===n.landing_id&&x.category===n.category);return 0;
 }
 function inDatePeriod(date, period, exact, from, to) {
-  const today = localDate();
-  if (period === 'today') return date === today;
-  if (period === 'yesterday') return date === localDate(-1);
-  if (period === 'date') return !exact || date === exact;
-  if (period === 'range') return (!from || date >= from) && (!to || date <= to);
-  if (period === 'week') {
-    const d = new Date(`${today}T12:00:00`);
-    d.setDate(d.getDate() - (d.getDay() + 6) % 7);
-    const monday = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    return date >= monday && date <= today;
-  }
-  if (period === 'month') return date.slice(0, 7) === today.slice(0, 7);
-  return date >= localDate(-29) && date <= today;
+  const today=new Date().toISOString().slice(0,10);
+  if(period==='today')return date===today;
+  if(period==='yesterday'){const d=new Date(today+'T12:00:00');d.setDate(d.getDate()-1);return date===d.toISOString().slice(0,10);}
+  if(period==='date')return !exact||date===exact;
+  if(period==='range')return (!from||date>=from)&&(!to||date<=to);
+  if(period==='week'){const d=new Date(today+'T12:00:00');d.setDate(d.getDate()-(d.getDay()+6)%7);return date>=d.toISOString().slice(0,10)&&date<=today;}
+  if(period==='month')return date.slice(0,7)===today.slice(0,7);
+  const cutoff=new Date(today+'T12:00:00');cutoff.setDate(cutoff.getDate()-29);return date>=cutoff.toISOString().slice(0,10)&&date<=today;
+}
+function filteredNotices(report=false) {
+  const period=$('#'+(report?'reportPeriod':'period')).value;
+  const exact=$('#'+(report?'reportExactDate':'exactDate')).value;
+  const from=$('#'+(report?'reportDateFrom':'dateFrom')).value;
+  const to=$('#'+(report?'reportDateTo':'dateTo')).value;
+  const weekday=$('#'+(report?'reportWeekday':'weekdayFilter'))?.value||'all';
+  const status=report?'all':$('#statusFilter').value;
+  const landing=report?'all':$('#landingFilter').value;
+  const query=(report?'':($('#tableSearch').value||$('#globalSearch').value)).toLowerCase();
+  return notices.filter(n=>{
+    const d=dateOnly(n.received_at), day=new Date(d+'T12:00:00').getDay();
+    const allText=[n.customer_name,n.phone,n.email,n.device,n.brand,n.issue,n.locality,landingName(n.landing_id),JSON.stringify(n.custom_fields||{})].join(' ').toLowerCase();
+    return inDatePeriod(d,period,exact,from,to)&&(weekday==='all'||day===Number(weekday))&&(status==='all'||n.status===status)&&(landing==='all'||n.landing_id===landing)&&(!query||allText.includes(query));
+  });
 }
 function renderRows() {
-  const q = (document.getElementById('tableSearch').value || document.getElementById('globalSearch').value).toLowerCase();
-  const st = document.getElementById('statusFilter').value;
-  const land = document.getElementById('landingFilter').value;
-  const weekday = document.getElementById('weekdayFilter').value;
-  const period = document.getElementById('period').value;
-  const exact = document.getElementById('exactDate').value;
-  const from = document.getElementById('dateFrom').value;
-  const to = document.getElementById('dateTo').value;
-  const rows = notices.filter(n => {
-    const day = new Date(`${n.date}T12:00:00`).getDay();
-    return (!q || `${n.name} ${n.phone} ${n.device} ${n.landing}`.toLowerCase().includes(q)) &&
-      (st === 'all' || n.status === st) && (land === 'all' || n.landing === land) &&
-      (weekday === 'all' || day === Number(weekday)) && inDatePeriod(n.date, period, exact, from, to);
-  });
-  tbody.innerHTML = rows.map(n => `<tr><td><div class="client-cell"><span class="client-initial">${escapeHtml(n.name.slice(-2))}</span><div><strong>${escapeHtml(n.name)}</strong><small>${escapeHtml(n.phone)}</small></div></div></td><td><span class="device">${escapeHtml(n.device)}</span></td><td><span class="source">${escapeHtml(n.landing)}</span></td><td>${escapeHtml(n.time)}</td><td><select class="status ${statusClass(n.status)}" data-index="${notices.indexOf(n)}" aria-label="Cambiar estado" style="border:0;appearance:none;padding-right:9px"><option ${n.status==='Nuevo'?'selected':''}>Nuevo</option><option ${n.status==='Sale'?'selected':''}>Sale</option><option ${n.status==='No sale'?'selected':''}>No sale</option></select></td><td>${getPrice(n.landing,n.device)}</td><td><button class="row-action" aria-label="Abrir aviso" data-open="${notices.indexOf(n)}">···</button></td></tr>`).join('');
-  document.getElementById('emptyState').hidden = rows.length > 0;
-  document.getElementById('rowCount').textContent = `Mostrando ${rows.length} de ${notices.length} avisos de ejemplo`;
-  const fresh=rows.filter(n=>n.status==='Nuevo').length, sold=rows.filter(n=>n.status==='Sale').length, lost=rows.filter(n=>n.status==='No sale').length;
-  const managed=sold+lost, total=rows.length;
-  document.getElementById('mTotal').textContent=total;
-  document.getElementById('mNew').textContent=fresh;
-  document.getElementById('mSold').textContent=sold;
-  document.getElementById('mLost').textContent=lost;
-  document.getElementById('mConversion').textContent=`${managed?Math.round(sold/managed*100):0} %`;
-  document.getElementById('mLostPercent').textContent=`${total?Math.round(lost/total*100):0} % de avisos recibidos`;
-  document.getElementById('donutTotal').textContent=total;
-  document.getElementById('donutSold').textContent=sold;
-  document.getElementById('donutLost').textContent=lost;
-  document.getElementById('donutNew').textContent=fresh;
-  const denominator=total||1, soldPct=sold/denominator*100, lostPct=lost/denominator*100;
-  document.querySelector('.donut').style.background=`conic-gradient(#5c70ed 0 ${soldPct}%,#efbb65 ${soldPct}% ${soldPct+lostPct}%,#dfe3eb ${soldPct+lostPct}% 100%)`;
-  const dayOrder=[1,2,3,4,5,6,0];
-  const daily=dayOrder.map(day=>{const group=rows.filter(n=>new Date(`${n.date}T12:00:00`).getDay()===day);return [group.length,group.filter(n=>n.status==='Sale').length,group.filter(n=>n.status==='No sale').length];});
-  const maxDaily=Math.max(1,...daily.flat());
-  document.querySelectorAll('.bar-group').forEach((group,index)=>group.querySelectorAll('.bar-stack .bar').forEach((bar,barIndex)=>{bar.style.height=`${daily[index][barIndex]/maxDaily*100}%`;}));
-  tbody.querySelectorAll('select').forEach(sel => sel.addEventListener('change', e => {
-    notices[+e.target.dataset.index].status = e.target.value;
-    e.target.className = 'status ' + statusClass(e.target.value);
-    renderRows();
-  }));
-  tbody.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => openDetails(+b.dataset.open)));
+  const body=$('#noticeRows');if(!body)return;
+  const rows=filteredNotices(false);
+  const landingFilter=$('#landingFilter')?.value||'all';
+  const shownFields=(landingFilter==='all'?fields:fieldsForLanding(landingFilter)).filter(f=>f.visible_in_table);
+  const systemHead='<th>LANDING DE ORIGEN</th><th>RECIBIDO</th><th>ESTADO</th><th>VALOR</th><th></th>';
+  const th=$('thead tr',body.closest('table'));if(th)th.innerHTML=shownFields.map(f=>`<th>${esc(f.label.toUpperCase())}</th>`).join('')+systemHead;
+  body.innerHTML=rows.map(n=>{
+    const cells=shownFields.map(f=>{
+      let v=n.custom_fields?.[f.field_key]??n[f.field_key]??'';
+      if(f.field_key==='customer_name')return `<td><div class="client-cell"><span class="client-initial">${esc((v||'??').slice(0,2).toUpperCase())}</span><div><strong>${esc(v||'Sin nombre')}</strong><small>${esc(n.phone||'')}</small></div></div></td>`;
+      if(f.field_key==='device')return `<td><span class="device">${esc(v||'—')}</span></td>`;
+      if(f.field_key==='phone')return `<td>${esc(v||'—')}</td>`;
+      return `<td>${esc(v||'—')}</td>`;
+    }).join('');
+    return `<tr>${cells}<td><span class="source">${esc(landingName(n.landing_id))}</span></td><td>${esc(formatDate(n.received_at))}</td><td><select class="status ${statusClass(n.status)}" data-status-id="${n.id}" aria-label="Cambiar estado">${['Nuevo','Sale','No sale'].map(s=>`<option ${s===n.status?'selected':''}>${s}</option>`).join('')}</select></td><td>${n.status==='Sale'?money(getUnitPrice(n)):'—'}</td><td><button class="row-action" data-open-id="${n.id}" aria-label="Abrir aviso">···</button></td></tr>`;
+  }).join('');
+  $('#emptyState').hidden=rows.length>0;
+  $('#rowCount').textContent=`Mostrando ${rows.length} de ${notices.length} avisos`;
+  const fresh=rows.filter(n=>n.status==='Nuevo').length,sold=rows.filter(n=>n.status==='Sale').length,lost=rows.filter(n=>n.status==='No sale').length,total=rows.length,managed=sold+lost;
+  $('#mTotal').textContent=total;$('#mNew').textContent=fresh;$('#mSold').textContent=sold;$('#mLost').textContent=lost;
+  $('#mConversion').textContent=`${managed?Math.round(sold/managed*100):0} %`;$('#mLostPercent').textContent=`${total?Math.round(lost/total*100):0} % de avisos recibidos`;
+  $('#donutTotal').textContent=total;$('#donutSold').textContent=sold;$('#donutLost').textContent=lost;$('#donutNew').textContent=fresh;
+  const soldPct=total?sold/total*100:0,lostPct=total?lost/total*100:0;
+  $('.donut').style.background=`conic-gradient(#5c70ed 0 ${soldPct}%,#efbb65 ${soldPct}% ${soldPct+lostPct}%,#dfe3eb ${soldPct+lostPct}% 100%)`;
+  const days=[1,2,3,4,5,6,0].map(day=>{const g=rows.filter(n=>new Date(dateOnly(n.received_at)+'T12:00:00').getDay()===day);return[g.length,g.filter(n=>n.status==='Sale').length,g.filter(n=>n.status==='No sale').length];});
+  const max=Math.max(1,...days.flat());
+  $$('.bar-group').forEach((g,i)=>$$('.bar',g).forEach((b,j)=>b.style.height=`${days[i]?.[j]/max*100||0}%`));
+  $$('[data-status-id]',body).forEach(sel=>sel.addEventListener('change',async e=>changeStatus(e.target.dataset.statusId,e.target.value)));
+  $$('[data-open-id]',body).forEach(b=>b.addEventListener('click',()=>showDetails(b.dataset.openId)));
+  renderReport();
 }
-function setupDateControls(prefix) {
-  const report = prefix === 'report';
-  const select = document.getElementById(report ? 'reportPeriod' : 'period');
-  const exactBox = document.getElementById(report ? 'reportExactDateControl' : 'exactDateControl');
-  const rangeBox = document.getElementById(report ? 'reportRangeControls' : 'rangeDateControls');
-  select.addEventListener('change', () => {
-    exactBox.hidden = select.value !== 'date';
-    rangeBox.hidden = select.value !== 'range';
-    if (report) renderReport(); else renderRows();
-  });
-  if (!report) ['exactDate','dateFrom','dateTo'].forEach(id => document.getElementById(id).addEventListener('change', renderRows));
-  else ['reportExactDate','reportDateFrom','reportDateTo'].forEach(id => document.getElementById(id).addEventListener('change', renderReport));
+async function changeStatus(id,status) {
+  const n=notices.find(x=>x.id===id);if(!n)return;
+  const tariff=tariffs.find(t=>t.landing_id===n.landing_id&&t.category===n.category);
+  const patch={status,managed_at:status==='Nuevo'?null:new Date().toISOString(),unit_price:status==='Sale'?Number(tariff?.price||0):0};
+  const {data,error}=await db.from('notices').update(patch).eq('id',id).select().single();
+  if(error){toast(errorText(error),'No se pudo guardar');renderRows();return;}
+  Object.assign(n,data);renderRows();
 }
-setupDateControls('main');
-setupDateControls('report');
-['tableSearch','globalSearch'].forEach(id => document.getElementById(id).addEventListener('input', renderRows));
-['statusFilter','landingFilter','weekdayFilter'].forEach(id => document.getElementById(id).addEventListener('change', renderRows));
-
-function showPage(name) {
-  document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === `page-${name}`));
-  document.querySelectorAll('.nav button[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page === name));
-  const labels = {avisos:'Avisos',informes:'Informes',empresas:'Empresas',usuarios:'Usuarios y permisos',configuracion:'Configuración',integraciones:'Integraciones'};
-  document.getElementById('breadcrumb').textContent = `Panel / ${labels[name]}`;
-  document.getElementById('sidebar').classList.remove('open');
-  window.scrollTo({top:0,behavior:'smooth'});
+function showDetails(id) {
+  const n=notices.find(x=>x.id===id);if(!n)return;
+  const custom=Object.entries(n.custom_fields||{}).map(([k,v])=>`${fields.find(f=>f.field_key===k)?.label||k}: ${v}`).join('\n');
+  alert(`Cliente: ${n.customer_name}\nTeléfono: ${n.phone}\nCorreo: ${n.email||'—'}\nAparato: ${n.device||'—'}\nOrigen: ${landingName(n.landing_id)}\nEstado: ${n.status}\nRecibido: ${formatDate(n.received_at)}\nLocalidad: ${n.locality||'—'}\nCódigo postal: ${n.postal_code||'—'}\nMarca: ${n.brand||'—'}\nAvería: ${n.issue||'—'}\n${custom}`);
 }
-document.querySelectorAll('.nav button[data-page]').forEach(b => b.addEventListener('click', () => showPage(b.dataset.page)));
-const modal = document.getElementById('modal');
-function openModal() { renderExtraFields(); modal.classList.add('open'); document.getElementById('fName').focus(); }
-function closeModal() { modal.classList.remove('open'); }
-document.getElementById('newNotice').addEventListener('click', openModal);
-document.getElementById('closeModal').addEventListener('click', closeModal);
-document.getElementById('cancelModal').addEventListener('click', closeModal);
-modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
-function showToast(message = 'Landing: La Terreta Asistencia · Aire acondicionado') {
-  const t = document.getElementById('toast'); t.querySelector('p').textContent = message; t.classList.add('show');
-  clearTimeout(window.toastTimer); window.toastTimer = setTimeout(() => t.classList.remove('show'), 5200);
+function setupDate(prefix) {
+  const report=prefix==='report', select=$('#'+(report?'reportPeriod':'period'));
+  const exact=$('#'+(report?'reportExactDateControl':'exactDateControl')), range=$('#'+(report?'reportRangeControls':'rangeDateControls'));
+  select.addEventListener('change',()=>{exact.hidden=select.value!=='date';range.hidden=select.value!=='range';report?renderReport():renderRows();});
+  (report?['reportExactDate','reportDateFrom','reportDateTo']:['exactDate','dateFrom','dateTo']).forEach(id=>$('#'+id).addEventListener('change',()=>report?renderReport():renderRows()));
 }
-document.getElementById('showToast').addEventListener('click', () => showToast());
-document.getElementById('noticeForm').addEventListener('submit', e => {
-  e.preventDefault();
-  const now = new Date(), clock = now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
-  const landing = document.getElementById('fLanding').value, device = document.getElementById('fDevice').value;
-  notices.unshift({name:document.getElementById('fName').value,phone:document.getElementById('fPhone').value,device,landing,date:localDate(),time:`Hoy, ${clock}`,status:'Nuevo'});
-  closeModal(); e.target.reset(); renderRows();
-  showToast(`Landing: ${landing} · ${device}`);
-});
-function openDetails(i) { const n = notices[i]; alert(`${n.name}\n${n.phone}\n${n.device}\nOrigen: ${n.landing}\nEstado: ${n.status}\nRecibido: ${n.time}`); }
-document.getElementById('menuToggle').addEventListener('click', () => document.getElementById('sidebar').classList.toggle('open'));
-document.getElementById('exportBtn').addEventListener('click', () => {
-  const csv = ['Cliente,Telefono,Aparato,Landing,Fecha,Estado,Valor', ...notices.map(n => [n.name,n.phone,n.device,n.landing,n.date,n.status,getPrice(n.landing,n.device)].join(','))].join('\n');
-  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = 'avisos-demo.csv'; a.click(); URL.revokeObjectURL(a.href);
-});
-document.getElementById('reportExport').addEventListener('click', () => document.getElementById('exportBtn').click());
-
-function getReportRows() {
-  const period=document.getElementById('reportPeriod').value;
-  const exact=document.getElementById('reportExactDate').value;
-  const from=document.getElementById('reportDateFrom').value;
-  const to=document.getElementById('reportDateTo').value;
-  const weekday=document.getElementById('reportWeekday').value;
-  return notices.filter(n=>{
-    const day=new Date(`${n.date}T12:00:00`).getDay();
-    return inDatePeriod(n.date,period,exact,from,to)&&(weekday==='all'||day===Number(weekday));
-  });
-}
+function getReportRows(){return filteredNotices(true);}
 function renderReport() {
-  const rows=getReportRows();
-  const sold=rows.filter(n=>n.status==='Sale');
-  const lost=rows.filter(n=>n.status==='No sale');
-  const managed=sold.length+lost.length;
-  const revenue=sold.reduce((sum,n)=>{const category=deviceCategory(n.device);const rule=priceRules.find(r=>r.landing===n.landing&&r.category===category);return sum+(rule?Number(rule.price):0);},0);
-  const counts=landingNames.map(landing=>{const group=rows.filter(n=>n.landing===landing);return {landing,total:group.length,sold:group.filter(n=>n.status==='Sale').length,lost:group.filter(n=>n.status==='No sale').length};});
-  const best=[...counts].sort((a,b)=>b.sold-a.sold||b.total-a.total)[0];
-  document.getElementById('reportConversion').textContent=`${managed?Math.round(sold.length/managed*100):0} %`;
-  document.getElementById('reportManagedCount').textContent=`${managed} avisos gestionados`;
-  document.getElementById('reportRevenue').textContent=`${revenue.toLocaleString('es-ES')} €`;
-  document.getElementById('reportTotal').textContent=rows.length;
-  document.getElementById('reportBestLanding').textContent=best&&best.total?best.landing:'—';
-  document.getElementById('reportBestDetail').textContent=best&&best.total?`${best.total} avisos · ${best.sold} sale`:'0 avisos sacados';
-  document.getElementById('reportLandingResults').innerHTML=counts.map(c=>`<div class="placeholder-tile"><strong>${escapeHtml(c.landing)}</strong><small>${c.total} avisos · ${c.sold} sale · ${c.lost} no sale</small></div>`).join('');
-  const totals=new Map();
-  sold.forEach(n=>{const category=deviceCategory(n.device);if(!category)return;const key=`${n.landing} · ${category}`;const rule=priceRules.find(r=>r.landing===n.landing&&r.category===category);const current=totals.get(key)||{amount:0,count:0};current.count++;current.amount+=rule?Number(rule.price):0;totals.set(key,current);});
-  const entries=[...totals.entries()].sort((a,b)=>b[1].amount-a[1].amount);
-  document.getElementById('reportPriceRows').innerHTML=entries.length?entries.map(([label,value])=>`<div style="display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #f0f1f5;padding:8px 0;font-size:11px"><span>${escapeHtml(label)} <small style="color:#929aaa">(${value.count})</small></span><strong>${value.amount.toLocaleString('es-ES')} €</strong></div>`).join(''):'<div class="empty">No hay avisos sacados en este filtro.</div>';
+  const rows=getReportRows(),sold=rows.filter(n=>n.status==='Sale'),lost=rows.filter(n=>n.status==='No sale'),managed=sold.length+lost.length;
+  const revenue=sold.reduce((a,n)=>a+Number(n.unit_price||0),0);
+  const groups=landings.map(l=>{const g=rows.filter(n=>n.landing_id===l.id);return{landing:l,total:g.length,sold:g.filter(n=>n.status==='Sale').length,lost:g.filter(n=>n.status==='No sale').length};});
+  const best=[...groups].sort((a,b)=>b.sold-a.sold||b.total-a.total)[0];
+  $('#reportConversion').textContent=`${managed?Math.round(sold.length/managed*100):0} %`;
+  $('#reportManagedCount').textContent=`${managed} avisos gestionados`;
+  $('#reportRevenue').textContent=money(revenue);$('#reportTotal').textContent=rows.length;
+  $('#reportBestLanding').textContent=best?.total?best.landing.name:'—';$('#reportBestDetail').textContent=best?.total?`${best.total} avisos · ${best.sold} sale`:'0 avisos sacados';
+  $('#reportLandingResults').innerHTML=groups.map(g=>`<div class="placeholder-tile"><strong>${esc(g.landing.name)}</strong><small>${g.total} avisos · ${g.sold} sale · ${g.lost} no sale</small></div>`).join('')||'<div class="empty">Añade una landing para empezar.</div>';
+  const totals=new Map();sold.forEach(n=>{const k=`${landingName(n.landing_id)} · ${n.category||'Sin categoría'}`,v=totals.get(k)||{amount:0,count:0};v.amount+=Number(n.unit_price||0);v.count++;totals.set(k,v);});
+  $('#reportPriceRows').innerHTML=[...totals].sort((a,b)=>b[1].amount-a[1].amount).map(([label,v])=>`<div style="display:flex;justify-content:space-between;border-bottom:1px solid #f0f1f5;padding:8px 0;font-size:11px"><span>${esc(label)} <small>(${v.count})</small></span><strong>${money(v.amount)}</strong></div>`).join('')||'<div class="empty">No hay avisos sacados en este filtro.</div>';
 }
-document.getElementById('reportWeekday').addEventListener('change',renderReport);
-
 function renderPriceRules() {
-  const body = document.getElementById('priceRows');
-  body.innerHTML = priceRules.map((r,i) => `<tr><td><select data-price-landing="${i}">${landingNames.map(n=>`<option ${r.landing===n?'selected':''}>${escapeHtml(n)}</option>`).join('')}</select></td><td><select data-price-category="${i}">${categoryNames.map(n=>`<option ${r.category===n?'selected':''}>${escapeHtml(n)}</option>`).join('')}</select></td><td><input type="number" min="0" step="0.01" value="${Number(r.price)}" data-price-value="${i}" aria-label="Precio por aviso"/></td><td><button class="mini-delete" data-price-delete="${i}" aria-label="Eliminar tarifa">×</button></td></tr>`).join('');
-  body.querySelectorAll('[data-price-landing]').forEach(el=>el.addEventListener('change',e=>{priceRules[+e.target.dataset.priceLanding].landing=e.target.value;persistConfig();renderRows();renderReport();}));
-  body.querySelectorAll('[data-price-category]').forEach(el=>el.addEventListener('change',e=>{priceRules[+e.target.dataset.priceCategory].category=e.target.value;persistConfig();renderRows();renderReport();}));
-  body.querySelectorAll('[data-price-value]').forEach(el=>el.addEventListener('change',e=>{priceRules[+e.target.dataset.priceValue].price=Number(e.target.value||0);persistConfig();renderRows();renderReport();}));
-  body.querySelectorAll('[data-price-delete]').forEach(el=>el.addEventListener('click',e=>{priceRules.splice(+e.target.dataset.priceDelete,1);persistConfig();renderPriceRules();renderRows();renderReport();}));
+  const body=$('#priceRows');if(!body)return;
+  body.innerHTML=tariffs.map((t,i)=>`<tr><td><select data-tariff-landing="${i}">${landings.map(l=>`<option value="${l.id}" ${l.id===t.landing_id?'selected':''}>${esc(l.name)}</option>`).join('')}</select></td><td><select data-tariff-category="${i}">${['Gama blanca','Clima'].map(c=>`<option ${c===t.category?'selected':''}>${c}</option>`).join('')}</select></td><td><input type="number" min="0" step="0.01" value="${t.price}" data-tariff-price="${i}"/></td><td><button class="mini-delete" data-tariff-delete="${i}" aria-label="Eliminar tarifa">×</button></td></tr>`).join('');
+  $$('[data-tariff-landing]').forEach(x=>x.addEventListener('change',e=>updateTariff(+e.target.dataset.tariffLanding,{landing_id:e.target.value})));
+  $$('[data-tariff-category]').forEach(x=>x.addEventListener('change',e=>updateTariff(+e.target.dataset.tariffCategory,{category:e.target.value})));
+  $$('[data-tariff-price]').forEach(x=>x.addEventListener('change',e=>updateTariff(+e.target.dataset.tariffPrice,{price:Number(e.target.value||0)})));
+  $$('[data-tariff-delete]').forEach(x=>x.addEventListener('click',async e=>{const t=tariffs[+e.target.dataset.tariffDelete];if(!confirm('¿Eliminar esta tarifa?'))return;const {error}=await db.from('tariffs').delete().eq('id',t.id);if(error)toast(errorText(error),'Error');else{tariffs=tariffs.filter(x=>x.id!==t.id);renderPriceRules();renderRows();}}));
 }
-document.getElementById('addPrice').addEventListener('click',()=>{const next=landingNames.flatMap(landing=>categoryNames.map(category=>({landing,category}))).find(candidate=>!priceRules.some(rule=>rule.landing===candidate.landing&&rule.category===candidate.category));if(!next){showToast('Ya hay una tarifa para cada categoría de las landings de ejemplo.');return;}priceRules.push({...next,price:0});persistConfig();renderPriceRules();});
-function renderFields() {
-  const list=document.getElementById('fieldList');
-  list.innerHTML=fields.map((f,i)=>`<div class="field-row"><span>${escapeHtml(f.name)} <small style="color:#929aaa">· ${escapeHtml(f.type)}</small></span><label><input type="checkbox" data-field-toggle="${i}" ${f.enabled?'checked':''}/> Visible</label><button class="mini-delete" data-field-delete="${i}" aria-label="Eliminar ${escapeHtml(f.name)}">×</button></div>`).join('');
-  list.querySelectorAll('[data-field-toggle]').forEach(el=>el.addEventListener('change',e=>{fields[+e.target.dataset.fieldToggle].enabled=e.target.checked;persistConfig();syncFields();renderExtraFields();}));
-  list.querySelectorAll('[data-field-delete]').forEach(el=>el.addEventListener('click',e=>{fields.splice(+e.target.dataset.fieldDelete,1);persistConfig();renderFields();syncFields();renderExtraFields();}));
+async function updateTariff(i,changes) {
+  const t=tariffs[i];const merged={...t,...changes,company_id:currentCompany.id,updated_at:new Date().toISOString()};
+  const duplicate=tariffs.find((other,index)=>index!==i&&other.landing_id===merged.landing_id&&other.category===merged.category);
+  if(duplicate){toast('Ya existe una tarifa para esa landing y categoría.','Tarifa duplicada');renderPriceRules();return;}
+  const {data,error}=await db.from('tariffs').update(merged).eq('id',t.id).select().single();
+  if(error){toast(errorText(error),'Tarifa no guardada');return;}
+  tariffs[i]=data;renderRows();renderReport();
 }
-function syncFields() {
-  document.querySelectorAll('[data-field-code]').forEach(el=>{
-    const code=el.dataset.fieldCode, setting=fields.find(f=>f.code===code);
-    el.hidden=!setting||!setting.enabled;
-    const control=el.querySelector('input,select');
-    if(control&&(code==='name'||code==='phone')) control.required=!!setting&&setting.enabled;
-  });
+async function renderFields() {
+  const list=$('#fieldList');if(!list)return;
+  const typeNames={text:'Texto',phone:'Teléfono',email:'Correo',number:'Número',date:'Fecha',select:'Lista',textarea:'Texto largo',checkbox:'Casilla'};
+  list.innerHTML=fields.map((f,i)=>`<div class="field-row" style="grid-template-columns:minmax(125px,1fr) 100px auto auto auto auto auto;gap:6px"><input data-field-label="${i}" aria-label="Nombre del campo" value="${esc(f.label)}"/><select data-field-type="${i}" aria-label="Tipo de campo">${Object.entries(typeNames).map(([key,label])=>`<option value="${key}" ${f.field_type===key?'selected':''}>${label}</option>`).join('')}</select><label><input type="checkbox" data-field-required="${i}" ${f.required?'checked':''}/> Obligatorio</label><label><input type="checkbox" data-field-table="${i}" ${f.visible_in_table?'checked':''}/> Columna</label><label><input type="checkbox" data-field-form="${i}" ${f.visible_in_form?'checked':''}/> Formulario</label><small>${f.landing_id?esc(landingName(f.landing_id)):'Todas'}</small><button class="mini-delete" data-field-delete="${i}" aria-label="Eliminar campo">×</button></div>`).join('')||'<div class="empty">Todavía no hay campos configurados.</div>';
+  $$('[data-field-label]').forEach(x=>x.addEventListener('change',async e=>{const i=+e.target.dataset.fieldLabel,label=e.target.value.trim();if(!label){e.target.value=fields[i].label;return;}await saveField(i,{label});}));
+  $$('[data-field-type]').forEach(x=>x.addEventListener('change',async e=>{const i=+e.target.dataset.fieldType,field_type=e.target.value;let options=fields[i].options||[];if(field_type==='select'){const answer=prompt('Opciones separadas por comas',options.join(', '));if(answer===null){renderFields();return;}options=answer.split(',').map(v=>v.trim()).filter(Boolean);}await saveField(i,{field_type,options});}));
+  $$('[data-field-required]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldRequired,{required:e.target.checked})));
+  $$('[data-field-table]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldTable,{visible_in_table:e.target.checked})));
+  $$('[data-field-form]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldForm,{visible_in_form:e.target.checked})));
+  $$('[data-field-delete]').forEach(x=>x.addEventListener('click',async e=>{const f=fields[+e.target.dataset.fieldDelete];if(!confirm(`¿Eliminar el campo «${f.label}» de futuras entradas?`))return;const {error}=await db.from('notice_fields').delete().eq('id',f.id);if(error)toast(errorText(error),'Error');else{fields=fields.filter(x=>x.id!==f.id);renderFields();renderRows();renderExtraFields();}}));
+}
+async function saveField(i,changes) {
+  const f=fields[i];const {data,error}=await db.from('notice_fields').update(changes).eq('id',f.id).select().single();
+  if(error){toast(errorText(error),'Campo no guardado');renderFields();return;}Object.assign(f,data);renderFields();renderRows();renderExtraFields();
+}
+function fieldsForLanding(landingId) {
+  const applicable=fields.filter(f=>!f.landing_id||f.landing_id===landingId);
+  const byKey=new Map();for(const f of applicable){const current=byKey.get(f.field_key);if(!current||f.landing_id===landingId)byKey.set(f.field_key,f);}
+  return [...byKey.values()].sort((a,b)=>a.position-b.position);
 }
 function renderExtraFields() {
-  const host=document.getElementById('extraNoticeFields');
-  host.innerHTML=fields.filter(f=>f.custom&&f.enabled).map(f=>{const type=f.type==='Fecha'?'date':f.type==='Número'?'number':f.type==='Casilla'?'checkbox':'text';return `<div class="field custom-field-value"><label>${escapeHtml(f.name)}</label><input type="${type}" placeholder="${escapeHtml(f.name)}"/></div>`;}).join('');
+  syncDefaultFields();
+  const host=$('#extraNoticeFields');if(!host)return;
+  const landingId=$('#fLanding')?.value||null;
+  host.innerHTML=fieldsForLanding(landingId).filter(f=>f.visible_in_form&&!['customer_name','phone','locality','postal_code','device','brand','issue'].includes(f.field_key)).map(f=>{
+    const inputType={text:'text',phone:'tel',email:'email',number:'number',date:'date',select:'select',textarea:'textarea',checkbox:'checkbox'}[f.field_type]||'text';
+    let field=inputType==='select'?'<select '+(f.required?'required':'')+'>'+['',...(f.options||[])].map(v=>`<option>${esc(v)}</option>`).join('')+'</select>':inputType==='textarea'?'<textarea '+(f.required?'required':'')+'></textarea>':`<input type="${inputType}" ${f.required?'required':''} ${inputType==='checkbox'?'value="true"':''}/>`;
+    return `<label class="field custom-field-value" data-custom-key="${esc(f.field_key)}"><span>${esc(f.label)}</span>${field}</label>`;
+  }).join('');
 }
-document.getElementById('addField').addEventListener('click',()=>{
-  const input=document.getElementById('newFieldName'), name=input.value.trim();
-  if(!name){input.focus();return;}
-  fields.push({name,type:document.getElementById('newFieldType').value,enabled:true,custom:true});
-  input.value='';persistConfig();renderFields();renderExtraFields();
-});
-document.getElementById('saveSettings').addEventListener('click',()=>{persistConfig();showToast('Configuración de demostración guardada en este navegador.');});
-document.getElementById('period').addEventListener('change',renderRows);
-renderRows();renderPriceRules();renderFields();syncFields();renderReport();
+function syncDefaultFields() {
+  const map={name:'customer_name',phone:'phone',locality:'locality',postal:'postal_code',device:'device',brand:'brand',issue:'issue'};
+  $$('[data-field-code]').forEach(el=>{
+    const code=map[el.dataset.fieldCode]||el.dataset.fieldCode;
+    const field=fields.find(f=>f.field_key===code);
+    el.hidden=!!field&&!field.visible_in_form;
+    if(field){const label=$('label',el);if(label)label.textContent=field.label;const control=$('input,select,textarea',el);if(control){control.required=field.required;if(field.field_type==='phone'&&control.tagName==='INPUT')control.type='tel';if(field.field_type==='email'&&control.tagName==='INPUT')control.type='email';if(field.field_type==='number'&&control.tagName==='INPUT')control.type='number';if(code==='device'&&control.tagName==='SELECT'&&field.options?.length)control.innerHTML=field.options.map(v=>`<option>${esc(v)}</option>`).join('');}}
+  });
+}
+async function createNotice(event) {
+  event.preventDefault();
+  const v=id=>$('#'+id).value.trim();
+  const device=v('fDevice'), landingId=v('fLanding'), custom_fields={};
+  $$('[data-custom-key]', $('#noticeForm')).forEach(el=>{const c=$('input,select,textarea',el);custom_fields[el.dataset.customKey]=c.type==='checkbox'?c.checked:c.value;});
+  const category=categoryFor(device), tariff=tariffs.find(t=>t.landing_id===landingId&&t.category===category);
+  const row={company_id:currentCompany.id,landing_id:landingId||null,status:'Nuevo',customer_name:v('fName'),phone:v('fPhone'),email:$('#fEmail')?.value?.trim()||null,locality:v('fLocality')||null,postal_code:v('fPostal')||null,device:device||null,category,brand:v('fBrand')||null,issue:v('fIssue')||null,custom_fields,unit_price:0,created_by:user.id};
+  const {data,error}=await db.from('notices').insert(row).select().single();
+  if(error){toast(errorText(error),'No se pudo guardar el aviso');return;}
+  notices.unshift(data);$('#modal').classList.remove('open');event.target.reset();renderRows();
+  const landing=landingName(data.landing_id);toast(`Landing: ${landing} · ${data.device||'Aviso'} · ${formatDate(data.received_at)}`,'Nuevo aviso recibido');
+  db.functions.invoke('notify-notice',{body:{notice_id:data.id}}).catch(()=>{});
+}
+async function renderSettings() {
+  if(!currentCompany)return;
+  const article=$('#page-configuracion .simple-grid article');
+  if(article) {
+    const input=$('input[value="Global Técnicos"]',article)||$('input',article); if(input)input.value=currentCompany.name;
+    const color=$('input[type=color]',article);if(color)color.value=currentCompany.primary_color||'#5267e8';
+    if(currentCompany.logo_path&&$('.company-logo',article)==null){const img=document.createElement('img');img.src=currentCompany.logo_path;img.className='company-logo';img.style='max-width:140px;max-height:60px;display:block;margin:10px 0';article.append(img);}
+    if(!$('#uploadLogo')){const b=document.createElement('button');b.id='uploadLogo';b.className='outline-btn';b.textContent='Subir logo';const file=document.createElement('input');file.type='file';file.accept='image/png,image/jpeg,image/webp,image/svg+xml';file.id='logoFile';file.hidden=true;article.append(file,b);b.onclick=()=>file.click();file.onchange=uploadLogo;}
+  }
+  renderFields();renderPriceRules();
+}
+async function saveCompanySettings() {
+  const article=$('#page-configuracion .simple-grid article');
+  const color=$('input[type=color]',article)?.value||'#5267e8';
+  const name=$('input',article)?.value?.trim()||currentCompany.name;
+  const {data,error}=await db.from('companies').update({name,primary_color:color}).eq('id',currentCompany.id).select().single();
+  if(error){toast(errorText(error),'Configuración no guardada');return;}
+  Object.assign(currentCompany,data);renderCompanyPicker();toast('Nombre y color guardados.');
+}
+async function uploadLogo(e) {
+  const file=e.target.files?.[0];if(!file)return;
+  if(file.size>2*1024*1024){toast('El logo no puede superar 2 MB.','Archivo demasiado grande');return;}
+  const ext=(file.name.split('.').pop()||'png').toLowerCase(), path=currentCompany.id+'/logo-'+Date.now()+'.'+ext;
+  const {error}=await db.storage.from('company-logos').upload(path,file,{upsert:true,contentType:file.type});
+  if(error){toast(errorText(error),'No se pudo subir el logo');return;}
+  const {data}=db.storage.from('company-logos').getPublicUrl(path);
+  const {error:saveError}=await db.from('companies').update({logo_path:data.publicUrl}).eq('id',currentCompany.id);
+  if(saveError){toast(errorText(saveError),'No se pudo guardar el logo');return;}
+  currentCompany.logo_path=data.publicUrl;renderSettings();toast('Logo actualizado.');
+}
+function renderCompanyPage() {
+  const section=$('#page-empresas');if(!section)return;
+  let grid=$('.simple-grid',section);if(!grid)return;
+  grid.innerHTML=companies.map(c=>`<button class="placeholder-tile" data-company-card="${c.id}" style="text-align:left;cursor:pointer"><div class="company-badge">${esc(c.name.slice(0,2).toUpperCase())}</div><strong>${esc(c.name)}</strong><small>${c.id===currentCompany.id?'Empresa actual':'Cambiar a esta empresa'}</small></button>`).join('')||'<div class="empty">Crea tu primera empresa.</div>';
+  $$('[data-company-card]',grid).forEach(b=>b.onclick=()=>{currentCompany=companies.find(c=>c.id===b.dataset.companyCard);renderCompanyPicker();loadCompanyData();});
+  const add=$('.page-head .primary-btn',section);if(add){add.onclick=async()=>{const name=prompt('Nombre de la nueva empresa');if(!name?.trim())return;const {data,error}=await db.rpc('create_company_for_self',{company_name:name.trim()});if(error)toast(errorText(error),'No se pudo crear');else await loadMemberships();};}
+}
+function renderMembers() {
+  const section=$('#page-usuarios');if(!section)return;
+  const grid=$('.simple-grid',section);if(grid)grid.innerHTML=members.map(m=>`<div class="placeholder-tile"><strong>${esc(m.email||m.user_id.slice(0,8))}</strong><small>${esc(m.role)}</small>${m.role==='owner'?'':`<button class="mini-delete" data-remove-member="${m.user_id}" aria-label="Quitar usuario">×</button>`}</div>`).join('')||'<div class="empty">No hay usuarios.</div>';
+  $$('[data-remove-member]',section).forEach(b=>b.onclick=async()=>{if(!confirm('¿Retirar este usuario de la empresa?'))return;const {error}=await db.from('company_members').delete().eq('company_id',currentCompany.id).eq('user_id',b.dataset.removeMember);if(error)toast(errorText(error),'No se pudo retirar');else{members=members.filter(m=>m.user_id!==b.dataset.removeMember);renderMembers();}});
+  const add=$('.page-head .primary-btn',section);if(add)add.onclick=async()=>{const email=prompt('Correo del nuevo usuario');if(!email?.trim())return;const role=prompt('Rol: admin, gestor o consulta','gestor');if(!['admin','gestor','consulta'].includes(role))return toast('El rol debe ser admin, gestor o consulta.');const {error}=await db.functions.invoke('invite-member',{body:{company_id:currentCompany.id,email:email.trim(),role}});toast(error?errorText(error):'Invitación enviada. El usuario recibirá un correo para acceder.',error?'No se pudo invitar':'Invitación enviada');};
+}
+async function renderIntegrations() {
+  const section=$('#page-integraciones');if(!section)return;
+  const old=$('.demo-banner',section);if(old)old.remove();
+  const grid=$('.simple-grid',section);if(!grid)return;
+  grid.innerHTML=`<article class="card simple-card"><div class="metric-icon">⌘</div><h2>Formularios web</h2><p>Conecta una landing y copia su endpoint y código de envío.</p><button class="outline-btn" id="addLanding" style="margin-top:10px">＋ Añadir landing</button><div id="landingIntegrations" style="display:grid;gap:12px;margin-top:14px"></div></article><article class="card simple-card"><div class="metric-icon" style="background:#e7f4ff;color:#2685c5">➤</div><h2>Telegram</h2><p>Notifica la llegada de avisos en el chat de la empresa.</p><div class="button-row"><button class="outline-btn" id="setupTelegram">Configurar Telegram</button><button class="outline-btn" id="testTelegram">Enviar prueba</button></div></article><article class="card simple-card"><div class="metric-icon amber">✉</div><h2>Correo electrónico</h2><p>Envía avisos a las direcciones que elijas mediante Resend.</p><div class="button-row"><button class="outline-btn" id="setupEmail">Configurar correo</button><button class="outline-btn" id="testEmail">Enviar prueba</button></div></article>`;
+  $('#addLanding').onclick=async()=>{const name=prompt('Nombre de la landing');if(!name?.trim())return;const url=prompt('URL de la landing (opcional)','')||null;const domains=prompt('Orígenes permitidos, separados por comas (ej. https://dominio.com)','')||'';const allowed_origins=domains.split(',').map(x=>x.trim()).filter(Boolean);const {data,error}=await db.from('landings').insert({company_id:currentCompany.id,name:name.trim(),url,allowed_origins}).select().single();if(error){toast(errorText(error),'No se pudo crear la landing');return;}landings.push(data);landings.sort((a,b)=>a.name.localeCompare(b.name));await loadCompanyData();showLandingCode(data);};
+  $('#setupTelegram').onclick=()=>configureIntegration('telegram');
+  $('#setupEmail').onclick=()=>configureIntegration('email');
+  $('#testTelegram').onclick=()=>testIntegration('telegram');$('#testEmail').onclick=()=>testIntegration('email');
+  const host=$('#landingIntegrations');
+  host.innerHTML=landings.map(l=>`<div class="placeholder-tile"><strong>${esc(l.name)}${l.is_active?'':' · Inactiva'}</strong><small>${esc(l.url||'Sin URL guardada')}</small><div class="button-row"><button class="outline-btn" data-code="${l.id}">Ver conexión</button><button class="mini-delete" data-delete-landing="${l.id}" aria-label="Desactivar landing">×</button></div></div>`).join('')||'<div class="empty">Todavía no hay landings conectadas.</div>';
+  $$('[data-code]',host).forEach(b=>b.onclick=()=>showLandingCode(landings.find(l=>l.id===b.dataset.code)));
+  $$('[data-delete-landing]',host).forEach(b=>b.onclick=async()=>{if(!confirm('¿Desactivar esta landing? Sus avisos y tarifas históricas se conservarán.'))return;const {error}=await db.from('landings').update({is_active:false}).eq('id',b.dataset.deleteLanding);if(error)toast(errorText(error),'No se pudo desactivar');else await loadCompanyData();});
+}
+async function configureIntegration(kind) {
+  let config={};
+  if(kind==='telegram') {
+    config.bot_token=prompt('Token del bot de Telegram (BotFather)');if(!config.bot_token)return;
+    config.chat_id=prompt('ID del chat o grupo donde recibir los avisos');if(!config.chat_id)return;
+  } else {
+    config.api_key=prompt('API key de Resend');if(!config.api_key)return;
+    config.from=prompt('Remitente verificado (ej. CRM <avisos@tudominio.com>)');if(!config.from)return;
+    config.to=prompt('Correos destinatarios, separados por comas');if(!config.to)return;
+    config.to=config.to.split(',').map(x=>x.trim()).filter(Boolean);
+  }
+  const {error}=await db.functions.invoke('manage-integration',{body:{company_id:currentCompany.id,kind,config,enabled:true}});
+  toast(error?errorText(error):'Integración guardada de forma privada.',error?'No se pudo guardar':'Conexión guardada');
+}
+async function testIntegration(kind) {
+  const {error}=await db.functions.invoke('notify-test',{body:{company_id:currentCompany.id,kind}});
+  toast(error?errorText(error):'Mensaje de prueba enviado.',error?'No se pudo enviar':'Prueba enviada');
+}
+function showLandingCode(landing) {
+  if(!landing)return;
+  const endpoint=CFG.url.replace(/\/$/,'')+'/functions/v1/service-form';
+  const code=`fetch('${endpoint}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({landing_key:'${landing.endpoint_key}',data:{customer_name:'Nombre',phone:'600000000',device:'Lavadora',issue:'Descripción de la avería'}})}).then(r=>r.json())`;
+  const backdrop=document.createElement('div');backdrop.className='modal-backdrop open';backdrop.innerHTML=`<div class="modal" style="max-width:640px"><div class="modal-head"><div><h2>Conectar ${esc(landing.name)}</h2><p>Endpoint y ejemplo de envío desde el formulario.</p></div><button class="close">×</button></div><p><strong>URL:</strong></p><div class="integration-code">${esc(endpoint)}</div><p><strong>Clave de landing:</strong></p><div class="integration-code">${esc(landing.endpoint_key)}</div><p><strong>Ejemplo JavaScript:</strong></p><div class="integration-code">${esc(code)}</div><div class="modal-actions"><button class="outline-btn" id="copyLandingCode">Copiar código</button><button class="primary-btn close-code">Cerrar</button></div></div>`;
+  document.body.append(backdrop);$('.close',backdrop).onclick=()=>backdrop.remove();$('.close-code',backdrop).onclick=()=>backdrop.remove();$('#copyLandingCode',backdrop).onclick=async()=>{await navigator.clipboard.writeText(code);toast('Código copiado.');};
+}
+document.querySelectorAll('.nav button[data-page]').forEach(b=>b.addEventListener('click',()=>showPage(b.dataset.page)));
+function showPage(name) {
+  $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+name));
+  $$('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
+  const labels={avisos:'Avisos',informes:'Informes',empresas:'Empresas',usuarios:'Usuarios y permisos',configuracion:'Configuración',integraciones:'Integraciones'};
+  $('#breadcrumb').textContent='Panel / '+labels[name];$('#sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'});
+}
+function wireUI() {
+  setupDate('main');setupDate('report');
+  ['tableSearch','globalSearch'].forEach(id=>$('#'+id).addEventListener('input',renderRows));
+  ['statusFilter','landingFilter','weekdayFilter'].forEach(id=>$('#'+id).addEventListener('change',renderRows));
+  $('#reportWeekday').addEventListener('change',renderReport);
+  $('#newNotice').addEventListener('click',()=>{$('#fLanding').innerHTML=landingOptions();renderExtraFields();$('#modal').classList.add('open');$('#fName').focus();});
+  $('#fLanding').addEventListener('change',()=>{syncDefaultFields();renderExtraFields();});
+  $('#closeModal').addEventListener('click',()=>$('#modal').classList.remove('open'));
+  $('#cancelModal').addEventListener('click',()=>$('#modal').classList.remove('open'));
+  $('#modal').addEventListener('click',e=>{if(e.target.id==='modal')e.currentTarget.classList.remove('open');});
+  $('#noticeForm').addEventListener('submit',createNotice);
+  $('#menuToggle').addEventListener('click',()=>$('#sidebar').classList.toggle('open'));
+  $('#showToast').addEventListener('click',()=>toast('Los avisos nuevos aparecerán aquí al entrar desde una landing.','Notificaciones'));
+  $('#exportBtn').addEventListener('click',()=>exportCsv(false));$('#reportExport').addEventListener('click',()=>exportCsv(true));
+  $('#addField').addEventListener('click',addField);
+  $('#saveSettings').addEventListener('click',saveCompanySettings);
+  $('#addPrice').addEventListener('click',addTariff);
+}
+async function addField() {
+  const label=$('#newFieldName').value.trim();if(!label)return;
+  const field_type=({Texto:'text',Número:'number',Fecha:'date',Lista:'select',Casilla:'checkbox'})[$('#newFieldType').value]||'text';
+  const key=label.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
+  const options=field_type==='select'?(prompt('Opciones separadas por comas')||'').split(',').map(x=>x.trim()).filter(Boolean):[];
+  const landing_id=$('#newFieldLanding')?.value||null;
+  const {data,error}=await db.from('notice_fields').insert({company_id:currentCompany.id,landing_id,field_key:key,label,field_type,options,required:false,visible_in_form:true,visible_in_table:true,position:fields.length+1}).select().single();
+  if(error){toast(errorText(error),'No se pudo añadir');return;}fields.push(data);$('#newFieldName').value='';renderFields();renderRows();renderExtraFields();
+}
+async function addTariff() {
+  if(!landings.length){toast('Crea primero una landing.');return;}
+  const next=landings.flatMap(l=>['Gama blanca','Clima'].map(category=>({landing_id:l.id,category}))).find(candidate=>!tariffs.some(t=>t.landing_id===candidate.landing_id&&t.category===candidate.category));
+  if(!next){toast('Ya hay una tarifa para Gama blanca y Clima en cada landing.');return;}
+  const {data,error}=await db.from('tariffs').insert({...next,company_id:currentCompany.id,price:0}).select().single();
+  if(error){toast(errorText(error),'No se pudo crear tarifa');return;}tariffs.push(data);renderPriceRules();
+}
+async function exportCsv(report=false) {
+  const rows=filteredNotices(report);
+  const columns=['Recibido','Estado','Cliente','Teléfono','Correo','Landing','Aparato','Categoría','Localidad','Código postal','Marca','Avería','Importe',...fields.filter(f=>f.visible_in_table).map(f=>f.label)];
+  const csv=[columns,...rows.map(n=>[formatDate(n.received_at),n.status,n.customer_name,n.phone,n.email||'',landingName(n.landing_id),n.device||'',n.category||'',n.locality||'',n.postal_code||'',n.brand||'',n.issue||'',n.status==='Sale'?n.unit_price:'',...fields.filter(f=>f.visible_in_table).map(f=>n.custom_fields?.[f.field_key]??n[f.field_key]??'')])].map(r=>r.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(',')).join('\r\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));a.download='avisos-'+new Date().toISOString().slice(0,10)+'.csv';a.click();URL.revokeObjectURL(a.href);
+}
+document.addEventListener('DOMContentLoaded',()=>{wireUI();openAuth();if(!db)return;db.auth.getSession().then(({data,error})=>{if(error){$('#authError').textContent=errorText(error);return;}if(data.session){user=data.session.user;loadMemberships().catch(e=>$('#authError').textContent=errorText(e));}});db.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_IN'&&session){user=session.user;setTimeout(()=>loadMemberships().catch(e=>{$('#authError').textContent=errorText(e);openAuth();}),0);}if(event==='SIGNED_OUT'){user=null;location.reload();}});});
+
