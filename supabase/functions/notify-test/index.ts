@@ -11,7 +11,7 @@ Deno.serve(async (req) => {
     const admin = adminClient()
     const role = await companyRole(admin, company_id, user.id)
     if (!['owner','admin','super_admin'].includes(role)) return json({ error: 'Solo el superadministrador puede probar integraciones.' }, 403)
-    const results = await sendNoticeNotifications(admin, company_id, {}, 'CRM Servicio Técnico', true, kind)
+    const results = await sendNoticeNotifications(admin, company_id, {}, 'CRM Gestión de avisos', true, kind)
     const result = results.find(x => x.kind === kind)
     if (!result) return json({ error: 'Configura esta integración antes de enviar la prueba.' }, 400)
     if (!result.ok) return json({ error: result.error || 'El proveedor rechazó la prueba.' }, 502)

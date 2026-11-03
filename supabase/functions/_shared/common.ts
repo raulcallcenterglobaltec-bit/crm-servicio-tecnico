@@ -79,7 +79,7 @@ export async function sendNoticeNotifications(admin: SupabaseClient, companyId: 
       const time = new Date().toLocaleString('es-ES',{timeZone:'Europe/Madrid',dateStyle:'short',timeStyle:'short'})
       const isCancellation = notice.notice_type === 'anulacion'
       const isComplaint = eventType === 'complaint'
-      const title = test ? 'Prueba de CRM Servicio Técnico' : isCancellation ? 'Nueva anulación telefónica' : isComplaint ? 'Nueva reclamación telefónica' : 'Nuevo aviso recibido'
+      const title = test ? 'Prueba de CRM Gestión de avisos' : isCancellation ? 'Nueva anulación telefónica' : isComplaint ? 'Nueva reclamación telefónica' : 'Nuevo aviso recibido'
       const originLabel = isComplaint ? 'Origen: Teléfono' : eventType === 'form' ? `Landing: ${landingName}` : 'Origen: Teléfono'
       const message = test ? 'La conexión de notificaciones está funcionando.' : `${title}\n${originLabel}\nHora: ${time}\nCliente: ${notice.customer_name || '—'}\nTeléfono: ${notice.phone || '—'}${eventType === 'form' ? `\nAparato: ${notice.device || '—'}\nAvería: ${notice.issue || '—'}` : `\nDetalle: ${notice.issue || '—'}`}`
       if (item.kind === 'telegram') {
@@ -99,7 +99,7 @@ export async function sendNoticeNotifications(admin: SupabaseClient, companyId: 
         if (!response.ok) throw new Error(`Correo respondió ${response.status}`)
       } else if (item.kind === 'whatsapp') {
         const params = test
-          ? ['CRM Servicio Técnico','Prueba', 'CRM Servicio Técnico', '34600000000', 'Aviso de prueba']
+          ? ['CRM Gestión de avisos','Prueba', 'CRM Gestión de avisos', '34600000000', 'Aviso de prueba']
           : [eventType === 'form' ? landingName : (isCancellation ? 'Anulación telefónica' : isComplaint ? 'Reclamación telefónica' : 'Aviso telefónico'), time, notice.customer_name || '—', notice.phone || '—', eventType === 'form' ? (notice.device || '—') : (notice.issue || '—')]
         const response = await fetch(`https://graph.facebook.com/v26.0/${encodeURIComponent(config.phone_number_id)}/messages`, {
           method: 'POST', headers: { Authorization: `Bearer ${config.access_token}`, 'Content-Type': 'application/json' },
