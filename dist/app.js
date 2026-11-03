@@ -230,6 +230,13 @@ function getUnitPrice(n) {
   if(n.status==='Sale')return Number(n.unit_price||0);
   const t=tariffs.find(x=>x.landing_id===n.landing_id&&x.category===n.category);return 0;
 }
+function normalizeLocality(value) { return String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().replace(/\s+/g,' ').toLocaleLowerCase('es-ES'); }
+function tariffForNotice(notice) {
+  if(notice.landing_id)return tariffs.find(t=>(t.scope||'landing')==='landing'&&t.landing_id===notice.landing_id&&t.category===notice.category)||null;
+  const city=normalizeLocality(notice.locality);
+  if(!city)return null;
+  return tariffs.find(t=>t.scope==='phone'&&t.category===notice.category&&normalizeLocality(t.locality)===city)||null;
+}
 function inDatePeriod(date, period, exact, from, to) {
   const today=dateOnly(new Date().toISOString());
   if(period==='today')return date===today;
@@ -305,7 +312,7 @@ function renderKanban(rows) {
         return value!==''&&value!==null&&value!==undefined?`<span><b>${esc(f.label)}:</b> ${esc(value)}</span>`:'';
       }).filter(Boolean).join('');
       const origin=n.created_by?'Teléfono':landingName(n.landing_id);
-      return `<article class="notice-card" draggable="${canManageCurrentNotices()}" data-card-id="${esc(n.id)}"><div class="notice-card-head"><div><strong>${esc(customer)}</strong></div><button type="button" class="row-action" data-open-card="${esc(n.id)}" aria-label="Ver aviso">···</button></div><div class="notice-card-fields">${details}<span><b>Origen:</b> ${esc(origin)}</span><span><b>Recibido:</b> ${esc(formatDate(n.received_at))}</span></div><div class="notice-card-foot"><select data-card-status="${esc(n.id)}" aria-label="Cambiar estado del aviso" ${canManageCurrentNotices()?'':'disabled'}>${['Nuevo','Sale','No sale'].map(s=>`<option value="${s}" ${s===status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select>${status==='Sale'&&!n.created_by?`<small>${money(getUnitPrice(n))}</small>`:''}</div></article>`;
+      return `<article class="notice-card" draggable="${canManageCurrentNotices()}" data-card-id="${esc(n.id)}"><div class="notice-card-head"><div><strong>${esc(customer)}</strong></div><button type="button" class="row-action" data-open-card="${esc(n.id)}" aria-label="Ver aviso">···</button></div><div class="notice-card-fields">${details}<span><b>Origen:</b> ${esc(origin)}</span><span><b>Recibido:</b> ${esc(formatDate(n.received_at))}</span></div><div class="notice-card-foot"><select data-card-status="${esc(n.id)}" aria-label="Cambiar estado del aviso" ${canManageCurrentNotices()?'':'disabled'}>${['Nuevo','Sale','No sale'].map(s=>`<option value="${s}" ${s===status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select>${status==='Sale'?`<small>${money(getUnitPrice(n))}</small>`:''}</div></article>`;
     }).join('');
     return `<section class="kanban-column" data-drop-status="${status}"><div class="kanban-column-head"><span>${labels[status]}</span><span class="kanban-count">${rows.filter(n=>(n.status||'Nuevo')===status).length}</span></div><div class="kanban-list">${cards||'<div class="empty" style="padding:22px 8px;font-size:10px">Arrastra un aviso aquí</div>'}</div></section>`;
   }).join('');
@@ -339,7 +346,7 @@ function renderRows() {
       return `<td>${esc(v||'—')}</td>`;
     }).join('');
     const sourceLabel=n.created_by?'Teléfono':landingName(n.landing_id);
-    return `<tr>${cells}<td><span class="source">${esc(sourceLabel)}</span></td><td>${esc(formatDate(n.received_at))}</td><td><select class="status ${statusClass(n.status)}" data-status-id="${n.id}" aria-label="Cambiar estado" ${canManage?'':'disabled'}>${['Nuevo','Sale','No sale'].map(s=>`<option value="${esc(s)}" ${s===n.status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select></td><td>${n.status==='Sale'&&!n.created_by?money(getUnitPrice(n)):'—'}</td><td><button class="row-action" data-open-id="${n.id}" aria-label="Abrir aviso">···</button></td></tr>`;
+    return `<tr>${cells}<td><span class="source">${esc(sourceLabel)}</span></td><td>${esc(formatDate(n.received_at))}</td><td><select class="status ${statusClass(n.status)}" data-status-id="${n.id}" aria-label="Cambiar estado" ${canManage?'':'disabled'}>${['Nuevo','Sale','No sale'].map(s=>`<option value="${esc(s)}" ${s===n.status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select></td><td>${n.status==='Sale'?money(getUnitPrice(n)):'—'}</td><td><button class="row-action" data-open-id="${n.id}" aria-label="Abrir aviso">···</button></td></tr>`;
   }).join('');
   $('#emptyState').hidden=rows.length>0;
   const sourceTotal=notices.filter(n=>n.notice_type==='aviso'&&(noticeSource==='phone'?!!n.created_by:!!n.landing_id)).length;
@@ -371,7 +378,7 @@ async function changeStatus(id,status) {
   if(!canManageCurrentNotices())return;
   const n=notices.find(x=>x.id===id);if(!n)return;
   const wasSale=n.status==='Sale';
-  const tariff=tariffs.find(t=>t.landing_id===n.landing_id&&t.category===n.category);
+  const tariff=tariffForNotice(n);
   const patch={status,managed_at:status==='Nuevo'?null:new Date().toISOString(),unit_price:status==='Sale'?Number(tariff?.price||0):0};
   const {data,error}=await db.from('notices').update(patch).eq('id',id).select().single();
   if(error){toast(errorText(error),'No se pudo guardar');renderRows();return;}
@@ -401,35 +408,66 @@ function setupDate(prefix) {
   select.addEventListener('change',()=>{exact.hidden=select.value!=='date';range.hidden=select.value!=='range';report?renderReport():renderRows();});
   (report?['reportExactDate','reportDateFrom','reportDateTo']:['exactDate','dateFrom','dateTo']).forEach(id=>$('#'+id).addEventListener('change',()=>report?renderReport():renderRows()));
 }
-function getReportRows(){return filteredNotices(true);}
+function getReportRows(){return getReportActivityRows().filter(n=>n.notice_type==='aviso');}
+function getReportActivityRows() {
+  const period=$('#reportPeriod').value,exact=$('#reportExactDate').value,from=$('#reportDateFrom').value,to=$('#reportDateTo').value;
+  const weekday=$('#reportWeekday')?.value||'all',status=$('#reportStatus')?.value||'all',landing=$('#reportLanding')?.value||'all';
+  return notices.filter(n=>{
+    const d=dateOnly(n.received_at),day=new Date(d+'T12:00:00').getDay();
+    return inDatePeriod(d,period,exact,from,to)&&(weekday==='all'||day===Number(weekday))&&(status==='all'||n.status===status)&&(landing==='all'||!n.landing_id||n.landing_id===landing);
+  });
+}
 function renderReport() {
   const rows=getReportRows(),sold=rows.filter(n=>n.status==='Sale'),lost=rows.filter(n=>n.status==='No sale'),managed=sold.length+lost.length;
   const revenue=sold.reduce((a,n)=>a+Number(n.unit_price||0),0);
-  const groups=landings.map(l=>{const g=rows.filter(n=>n.landing_id===l.id);return{landing:l,total:g.length,sold:g.filter(n=>n.status==='Sale').length,lost:g.filter(n=>n.status==='No sale').length};});
+  const formRows=rows.filter(n=>!!n.landing_id),groups=landings.map(l=>{const g=formRows.filter(n=>n.landing_id===l.id);return{landing:l,total:g.length,sold:g.filter(n=>n.status==='Sale').length,lost:g.filter(n=>n.status==='No sale').length};});
   const best=[...groups].sort((a,b)=>b.sold-a.sold||b.total-a.total)[0];
+  const activity=getReportActivityRows(),phoneRows=activity.filter(n=>n.notice_type==='aviso'&&!!n.created_by&&!n.landing_id),complaintRows=activity.filter(n=>n.notice_type==='reclamacion'),cancellationRows=activity.filter(n=>n.notice_type==='anulacion');
+  const sourceCard=(title,items,labels,metricLabel)=>{
+    const counts=['Nuevo','Sale','No sale'].map(status=>items.filter(n=>n.status===status).length),total=items.length,converted=counts[1]+counts[2],pct=converted?Math.round(counts[1]/converted*100):0;
+    return `<div class="report-source-card"><div class="report-source-heading"><strong>${esc(title)}</strong><b>${total}</b></div><div class="report-source-stats">${counts.map((count,i)=>`<div><strong>${count}</strong><span>${esc(labels[i])}</span></div>`).join('')}</div><div class="report-source-percent"><span>${esc(metricLabel)}</span><strong>${pct} %</strong></div></div>`;
+  };
   $('#reportConversion').textContent=`${managed?Math.round(sold.length/managed*100):0} %`;
   $('#reportManagedCount').textContent=`${managed} avisos gestionados`;
   $('#reportRevenue').textContent=money(revenue);$('#reportTotal').textContent=rows.length;
   $('#reportBestLanding').textContent=best?.total?best.landing.name:'—';$('#reportBestDetail').textContent=best?.total?`${best.total} avisos · ${best.sold} Avisos Sacados`:'0 avisos sacados';
-  $('#reportLandingResults').innerHTML=groups.map(g=>`<div class="placeholder-tile"><strong>${esc(g.landing.name)}</strong><small>${g.total} avisos · ${g.sold} Avisos Sacados · ${g.lost} Avisos Nulos</small></div>`).join('')||'<div class="empty">Añade una landing para empezar.</div>';
-  const totals=new Map();sold.forEach(n=>{const k=`${landingName(n.landing_id)} · ${n.category||'Sin categoría'}`,v=totals.get(k)||{amount:0,count:0};v.amount+=Number(n.unit_price||0);v.count++;totals.set(k,v);});
+  $('#reportLandingResults').innerHTML=groups.filter(g=>g.total>0).map(g=>`<div class="placeholder-tile"><strong>${esc(g.landing.name)}</strong><small>${g.total} avisos · ${g.sold} Avisos Sacados · ${g.lost} Avisos Nulos</small></div>`).join('')||'<div class="empty">No hay avisos de formulario en este filtro.</div>';
+  $('#reportPhoneResults').innerHTML=sourceCard('Avisos telefónicos',phoneRows,['Pendiente','Aviso Sacado','Aviso Nulo'],'Conversión de gestionados');
+  $('#reportComplaintResults').innerHTML=sourceCard('Reclamaciones',complaintRows,['Pendiente','Envío solicitado','Cliente equivocado'],'Envío solicitado')+sourceCard('Anulaciones',cancellationRows,['Pendiente','Envío solicitado','Cliente equivocado'],'Envío solicitado');
+  const totals=new Map();sold.forEach(n=>{const origin=n.landing_id?landingName(n.landing_id):`Teléfono · ${n.locality||'Ciudad sin indicar'}`;const k=`${origin} · ${n.category||'Sin categoría'}`,v=totals.get(k)||{amount:0,count:0};v.amount+=Number(n.unit_price||0);v.count++;totals.set(k,v);});
   $('#reportPriceRows').innerHTML=[...totals].sort((a,b)=>b[1].amount-a[1].amount).map(([label,v])=>`<div style="display:flex;justify-content:space-between;border-bottom:1px solid #f0f1f5;padding:8px 0;font-size:11px"><span>${esc(label)} <small>(${v.count})</small></span><strong>${money(v.amount)}</strong></div>`).join('')||'<div class="empty">No hay avisos sacados en este filtro.</div>';
 }
 function renderPriceRules() {
   const body=$('#priceRows');if(!body)return;
-  body.innerHTML=tariffs.map((t,i)=>`<tr><td><select data-tariff-landing="${i}">${landings.map(l=>`<option value="${l.id}" ${l.id===t.landing_id?'selected':''}>${esc(l.name)}</option>`).join('')}</select></td><td><select data-tariff-category="${i}">${['Gama blanca','Clima'].map(c=>`<option ${c===t.category?'selected':''}>${c}</option>`).join('')}</select></td><td><input type="number" min="0" step="0.01" value="${t.price}" data-tariff-price="${i}"/></td><td><button class="mini-delete" data-tariff-delete="${i}" aria-label="Eliminar tarifa">×</button></td></tr>`).join('');
+  const cityBody=$('#phonePriceRows');
+  body.innerHTML=tariffs.map((t,i)=>(t.scope||'landing')==='landing'?`<tr><td><select data-tariff-landing="${i}">${landings.map(l=>`<option value="${l.id}" ${l.id===t.landing_id?'selected':''}>${esc(l.name)}</option>`).join('')}</select></td><td><select data-tariff-category="${i}">${['Gama blanca','Clima'].map(c=>`<option ${c===t.category?'selected':''}>${c}</option>`).join('')}</select></td><td><input type="number" min="0" step="0.01" value="${t.price}" data-tariff-price="${i}"/></td><td><button class="mini-delete" data-tariff-delete="${i}" aria-label="Eliminar tarifa">×</button></td></tr>`:'').join('')||'<tr><td colspan="4" class="empty">Todavía no hay tarifas por landing.</td></tr>';
+  if(cityBody)cityBody.innerHTML=tariffs.map((t,i)=>t.scope==='phone'?`<tr><td><input type="text" value="${esc(t.locality)}" data-tariff-locality="${i}" aria-label="Ciudad"/></td><td><select data-tariff-phone-category="${i}">${['Gama blanca','Clima'].map(c=>`<option ${c===t.category?'selected':''}>${c}</option>`).join('')}</select></td><td><input type="number" min="0" step="0.01" value="${t.price}" data-tariff-price="${i}"/></td><td><button class="mini-delete" data-tariff-delete="${i}" aria-label="Eliminar tarifa telefónica">×</button></td></tr>`:'').join('')||'<tr><td colspan="4" class="empty">Todavía no hay tarifas por ciudad.</td></tr>';
   $$('[data-tariff-landing]').forEach(x=>x.addEventListener('change',e=>updateTariff(+e.target.dataset.tariffLanding,{landing_id:e.target.value})));
   $$('[data-tariff-category]').forEach(x=>x.addEventListener('change',e=>updateTariff(+e.target.dataset.tariffCategory,{category:e.target.value})));
+  $$('[data-tariff-phone-category]').forEach(x=>x.addEventListener('change',e=>updateTariff(+e.target.dataset.tariffPhoneCategory,{category:e.target.value})));
+  $$('[data-tariff-locality]').forEach(x=>x.addEventListener('change',e=>updateTariff(+e.target.dataset.tariffLocality,{locality:e.target.value.trim()})));
   $$('[data-tariff-price]').forEach(x=>x.addEventListener('change',e=>updateTariff(+e.target.dataset.tariffPrice,{price:Number(e.target.value||0)})));
   $$('[data-tariff-delete]').forEach(x=>x.addEventListener('click',async e=>{const t=tariffs[+e.target.dataset.tariffDelete];if(!await confirmDialog('¿Eliminar esta tarifa?'))return;const {error}=await db.from('tariffs').delete().eq('id',t.id);if(error)toast(errorText(error),'Error');else{tariffs=tariffs.filter(x=>x.id!==t.id);renderPriceRules();renderRows();}}));
 }
 async function updateTariff(i,changes) {
-  const t=tariffs[i];const merged={...t,...changes,company_id:currentCompany.id,updated_at:new Date().toISOString()};
-  const duplicate=tariffs.find((other,index)=>index!==i&&other.landing_id===merged.landing_id&&other.category===merged.category);
-  if(duplicate){toast('Ya existe una tarifa para esa landing y categoría.','Tarifa duplicada');renderPriceRules();return;}
+  const t=tariffs[i];if(!t)return;
+  const merged={...t,...changes,company_id:currentCompany.id,updated_at:new Date().toISOString()};
+  if(merged.scope==='phone'){merged.locality=String(merged.locality||'').trim();if(!merged.locality){toast('Indica la ciudad para esta tarifa.','Falta la ciudad');renderPriceRules();return;}}
+  const duplicate=tariffs.find((other,index)=>index!==i&&other.category===merged.category&&((merged.scope==='phone'&&other.scope==='phone'&&normalizeLocality(other.locality)===normalizeLocality(merged.locality))||((other.scope||'landing')==='landing'&&(merged.scope||'landing')==='landing'&&other.landing_id===merged.landing_id)));
+  if(duplicate){toast(merged.scope==='phone'?'Ya existe una tarifa para esa ciudad y categoría.':'Ya existe una tarifa para esa landing y categoría.','Tarifa duplicada');renderPriceRules();return;}
   const {data,error}=await db.from('tariffs').update(merged).eq('id',t.id).select().single();
   if(error){toast(errorText(error),'Tarifa no guardada');return;}
   tariffs[i]=data;renderRows();renderReport();
+}
+async function addPhoneTariff() {
+  const answer=await formDialog({title:'Añadir tarifa telefónica',description:'Indica la ciudad y el precio para cada categoría. La llamada debe incluir esa misma ciudad.',fields:[{key:'locality',label:'Ciudad o municipio',required:true},{key:'category',label:'Categoría',type:'select',value:'Gama blanca',options:['Gama blanca','Clima']},{key:'price',label:'Precio por aviso',type:'number',value:0,required:true}]});
+  if(!answer)return;
+  const locality=answer.locality.trim();
+  if(!locality){toast('Escribe una ciudad o municipio.','Falta la ciudad');return;}
+  if(tariffs.some(t=>t.scope==='phone'&&t.category===answer.category&&normalizeLocality(t.locality)===normalizeLocality(locality))){toast('Ya existe una tarifa para esa ciudad y categoría.','Tarifa duplicada');return;}
+  const {data,error}=await db.from('tariffs').insert({company_id:currentCompany.id,scope:'phone',landing_id:null,locality,category:answer.category,price:Math.max(0,Number(answer.price)||0)}).select().single();
+  if(error){toast(errorText(error),'No se pudo crear la tarifa telefónica');return;}
+  tariffs.push(data);renderPriceRules();renderReport();
 }
 async function renderFields() {
   const list=$('#fieldList');if(!list)return;
@@ -439,7 +477,8 @@ async function renderFields() {
   const description=$('#fieldEditorDescription');if(description)description.textContent=fieldScope==='phone'?'Configura los datos de los avisos que se reciben por teléfono.':'Los campos generales se aplican a todas las landing. Selecciona una landing para configurar sus campos específicos.';
   const landingWrap=$('#landingFieldControls');if(landingWrap)landingWrap.hidden=fieldScope==='phone';
   const typeNames={text:'Texto',phone:'Teléfono',email:'Correo',number:'Número',date:'Fecha',select:'Lista',textarea:'Texto largo',checkbox:'Casilla'};
-  list.innerHTML=fieldEditorRows.map((f,i)=>`<div class="field-row" style="grid-template-columns:minmax(125px,1fr) 100px auto auto auto auto auto auto;gap:6px"><input data-field-label="${i}" aria-label="Nombre del campo" value="${esc(f.label)}"/><select data-field-type="${i}" aria-label="Tipo de campo">${Object.entries(typeNames).map(([key,label])=>`<option value="${key}" ${f.field_type===key?'selected':''}>${label}</option>`).join('')}</select><label><input type="checkbox" data-field-required="${i}" ${f.required?'checked':''}/> Obligatorio</label><label><input type="checkbox" data-field-table="${i}" ${f.visible_in_table?'checked':''}/> Columna</label><label><input type="checkbox" data-field-card-config="${i}" ${f.visible_on_card?'checked':''} ${f.field_key==='customer_name'?'disabled':''}/> Tarjeta</label><label><input type="checkbox" data-field-form="${i}" ${f.visible_in_form?'checked':''}/> Formulario</label><small>${f.landing_id?esc(landingName(f.landing_id)):'Todas'}</small><button class="mini-delete" data-field-delete="${i}" aria-label="Eliminar campo">×</button></div>`).join('')||'<div class="empty">No hay campos exclusivos en esta selección. Los campos generales se mantienen si has seleccionado una landing.</div>';
+  const formColumnLabel=fieldScope==='phone'?'Mostrar al registrar llamada':'Incluir en formulario web';
+  list.innerHTML=fieldEditorRows.map((f,i)=>`<div class="field-row" style="grid-template-columns:minmax(125px,1fr) 100px auto auto auto auto auto auto;gap:6px"><input data-field-label="${i}" aria-label="Nombre del campo" value="${esc(f.label)}"/><select data-field-type="${i}" aria-label="Tipo de campo">${Object.entries(typeNames).map(([key,label])=>`<option value="${key}" ${f.field_type===key?'selected':''}>${label}</option>`).join('')}</select><label><input type="checkbox" data-field-required="${i}" ${f.required?'checked':''}/> Obligatorio</label><label><input type="checkbox" data-field-table="${i}" ${f.visible_in_table?'checked':''}/> Columna</label><label><input type="checkbox" data-field-card-config="${i}" ${f.visible_on_card?'checked':''} ${f.field_key==='customer_name'?'disabled':''}/> Tarjeta</label><label><input type="checkbox" data-field-form="${i}" ${f.visible_in_form?'checked':''}/> ${formColumnLabel}</label><small>${fieldScope==='phone'?'Llamada telefónica':f.landing_id?esc(landingName(f.landing_id)):'Todas las landings'}</small><button class="mini-delete" data-field-delete="${i}" aria-label="Eliminar campo">×</button></div>`).join('')||'<div class="empty">No hay campos exclusivos en esta selección. Los campos generales se mantienen si has seleccionado una landing.</div>';
   $$('[data-field-label]').forEach(x=>x.addEventListener('change',async e=>{const i=+e.target.dataset.fieldLabel,label=e.target.value.trim();if(!label){e.target.value=fieldEditorRows[i].label;return;}await saveField(i,{label});}));
   $$('[data-field-type]').forEach(x=>x.addEventListener('change',async e=>{const i=+e.target.dataset.fieldType,field_type=e.target.value;let options=fieldEditorRows[i].options||[];if(field_type==='select'){const answer=await formDialog({title:'Opciones del campo',description:'Escribe las opciones separadas por comas.',fields:[{key:'options',label:'Opciones',type:'text',value:options.join(', '),required:true}]});if(!answer){renderFields();return;}options=answer.options.split(',').map(v=>v.trim()).filter(Boolean);}await saveField(i,{field_type,options});}));
   $$('[data-field-required]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldRequired,{required:e.target.checked})));
@@ -524,6 +563,7 @@ async function createNotice(event) {
   $$('[data-custom-key]', $('#noticeForm')).forEach(el=>{const c=$('input,select,textarea',el);custom_fields[el.dataset.customKey]=c.type==='checkbox'?c.checked:c.value;});
   const category=categoryFor(device);
   const row={company_id:currentCompany.id,landing_id:null,notice_type:type,status:v('fStatus')||'Nuevo',customer_name:v('fName'),phone:v('fPhone'),email:$('#fEmail')?.value?.trim()||null,locality:v('fLocality')||null,postal_code:v('fPostal')||null,device:device||null,category:isPhoneNotice?category:null,brand:isPhoneNotice?(v('fBrand')||null):null,issue:v('fIssue')||null,custom_fields,unit_price:0,created_by:user.id};
+  if(row.status==='Sale'&&isPhoneNotice)row.unit_price=Number(tariffForNotice(row)?.price||0);
   const {data,error}=await db.from('notices').insert(row).select().single();
   if(error){submitButtons.forEach(button=>button.disabled=false);toast(errorText(error),'No se pudo guardar el aviso');return;}
   submitButtons.forEach(button=>button.disabled=false);
@@ -713,6 +753,7 @@ function wireUI() {
   $('#page-empresas .page-head .primary-btn').addEventListener('click',addCompany);
   $('#saveSettings').addEventListener('click',saveCompanySettings);
   $('#addPrice').addEventListener('click',addTariff);
+  $('#addPhonePrice').addEventListener('click',addPhoneTariff);
 }
 async function addField() {
   const label=$('#newFieldName').value.trim();if(!label)return;
@@ -725,13 +766,13 @@ async function addField() {
 }
 async function addTariff() {
   if(!landings.length){toast('Crea primero una landing.');return;}
-  const next=landings.flatMap(l=>['Gama blanca','Clima'].map(category=>({landing_id:l.id,category}))).find(candidate=>!tariffs.some(t=>t.landing_id===candidate.landing_id&&t.category===candidate.category));
+  const next=landings.flatMap(l=>['Gama blanca','Clima'].map(category=>({landing_id:l.id,category,scope:'landing'}))).find(candidate=>!tariffs.some(t=>(t.scope||'landing')==='landing'&&t.landing_id===candidate.landing_id&&t.category===candidate.category));
   if(!next){toast('Ya hay una tarifa para Gama blanca y Clima en cada landing.');return;}
   const {data,error}=await db.from('tariffs').insert({...next,company_id:currentCompany.id,price:0}).select().single();
   if(error){toast(errorText(error),'No se pudo crear tarifa');return;}tariffs.push(data);renderPriceRules();
 }
 async function exportCsv(report=false) {
-  const rows=filteredNotices(report);
+  const rows=report?getReportRows():filteredNotices(false);
   const columns=['Recibido','Estado','Cliente','Teléfono','Correo','Landing','Aparato','Categoría','Localidad','Código postal','Marca','Avería','Importe',...fields.filter(f=>f.visible_in_table).map(f=>f.label)];
   const csv=[columns,...rows.map(n=>[formatDate(n.received_at),statusLabel(n.status),n.customer_name,n.phone,n.email||'',landingName(n.landing_id),n.device||'',n.category||'',n.locality||'',n.postal_code||'',n.brand||'',n.issue||'',n.status==='Sale'?n.unit_price:'',...fields.filter(f=>f.visible_in_table).map(f=>n.custom_fields?.[f.field_key]??n[f.field_key]??'')])].map(r=>r.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(',')).join('\r\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));a.download='avisos-'+new Date().toISOString().slice(0,10)+'.csv';a.click();URL.revokeObjectURL(a.href);
