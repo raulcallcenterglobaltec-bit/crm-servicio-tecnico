@@ -7,7 +7,7 @@ Deno.serve(async (req) => {
   if (!user) return json({ error: 'Debes iniciar sesión.' }, 401)
   try {
     const { company_id, kind } = await req.json()
-    if (!company_id || !['telegram','email'].includes(kind)) return json({ error: 'Empresa o integración no válida.' }, 400)
+    if (!company_id || !['telegram','email','whatsapp'].includes(kind)) return json({ error: 'Empresa o integración no válida.' }, 400)
     const admin = adminClient()
     const role = await companyRole(admin, company_id, user.id)
     if (!['owner','admin'].includes(role)) return json({ error: 'Solo un administrador puede probar integraciones.' }, 403)
