@@ -23,7 +23,7 @@ Deno.serve(async (req) => {
 
     const { data: fieldRows, error: fieldsError } = await admin.from('notice_fields').select('*').eq('company_id', landing.company_id)
     if (fieldsError) throw fieldsError
-    const activeFields = (fieldRows || []).filter(f => f.visible_in_form && (!f.landing_id || f.landing_id === landing.id))
+    const activeFields = (fieldRows || []).filter(f => f.channel === 'landing' && f.visible_in_form && (!f.landing_id || f.landing_id === landing.id))
     const lookup = (key: string, alt?: string) => input[key] ?? (alt ? input[alt] : undefined)
     const customerName = text(lookup('customer_name','name'), 160)
     const phone = text(lookup('phone','telephone'), 60)
