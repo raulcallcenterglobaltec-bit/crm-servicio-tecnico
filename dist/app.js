@@ -482,8 +482,16 @@ function updateRecordFormMode() {
   $('#recordTypeWrap').hidden=noticeSource!=='phone'||!nonNotice;
   $('#statusFieldWrap').hidden=noticeSource!=='phone';
   const status=$('#fStatus'),statusLabel=$('#fStatusLabel');
-  if(status&&statusLabel&&nonNotice){const previous=status.value;statusLabel.textContent='Resultado de la llamada';status.innerHTML='<option value="Sale">Enviar reclamación o anulación</option><option value="No sale">No es nuestra (cliente equivocado)</option>';status.value=previous==='No sale'?'No sale':'Sale';}
-  else if(status&&statusLabel){statusLabel.textContent='Resultado del aviso';status.innerHTML='<option value="Nuevo">Pendiente</option><option value="Sale">Aviso Sacado</option><option value="No sale">Aviso Nulo</option>';status.value='Nuevo';}
+  if(status&&statusLabel&&nonNotice){
+    const previous=status.value;
+    statusLabel.textContent='Resultado de la llamada';
+    status.innerHTML='<option value="Sale">Enviar reclamación o anulación</option><option value="No sale">No es nuestra (cliente equivocado)</option>';
+    status.value=previous==='No sale'?'No sale':'Sale';
+  } else if(status&&statusLabel){
+    statusLabel.textContent='Resultado del aviso';
+    status.innerHTML='<option value="Nuevo">Pendiente</option><option value="Sale">Aviso Sacado</option><option value="No sale">Aviso Nulo</option>';
+    status.value='Nuevo';
+  }
   const deviceField=$('[data-field-code="device"]'),brandField=$('[data-field-code="brand"]'),issueField=$('[data-field-code="issue"]');
   if(deviceField&&nonNotice)deviceField.hidden=true;
   if(brandField&&nonNotice)brandField.hidden=true;
@@ -583,9 +591,9 @@ function renderCompanyPage() {
   if(!isSuperAdmin)return;
   const section=$('#page-empresas');if(!section)return;
   let grid=$('.simple-grid',section);if(!grid)return;
-  grid.innerHTML=companies.map(c=>'<div class="placeholder-tile" style="display:flex;align-items:center;justify-content:space-between;gap:12px"><button type="button" data-company-card="'+c.id+'" style="flex:1;text-align:left;border:0;background:transparent;color:inherit;padding:0;cursor:pointer"><span class="company-badge">'+esc(c.name.slice(0,2).toUpperCase())+'</span><strong>'+esc(c.name)+'</strong><small>'+(c.id===currentCompany?.id?'Empresa actual':'Cambiar a esta empresa')+'</small></button><button type="button" class="mini-delete" data-delete-company="'+c.id+'" aria-label="Eliminar empresa '+esc(c.name)+'" title="Eliminar empresa" ' >×</button></div>').join('')||'<div class="empty">Crea tu primera empresa.</div>';
-  $('[data-company-card]',grid).forEach(b=>b.onclick=()=>{currentCompany=companies.find(c=>c.id===b.dataset.companyCard);renderCompanyPicker();loadCompanyData();});
-  $('[data-delete-company]',grid).forEach(b=>b.onclick=async()=>{
+  grid.innerHTML=companies.map(c=>`<div class="placeholder-tile" style="display:flex;align-items:center;justify-content:space-between;gap:12px"><button type="button" data-company-card="${c.id}" style="flex:1;text-align:left;border:0;background:transparent;color:inherit;padding:0;cursor:pointer"><span class="company-badge">${esc(c.name.slice(0,2).toUpperCase())}</span><strong>${esc(c.name)}</strong><small>${c.id===currentCompany?.id?'Empresa actual':'Cambiar a esta empresa'}</small></button><button type="button" class="mini-delete" data-delete-company="${c.id}" aria-label="Eliminar empresa ${esc(c.name)}" title="Eliminar empresa">×</button></div>`).join('')||'<div class="empty">Crea tu primera empresa.</div>';
+  $$('[data-company-card]',grid).forEach(b=>b.onclick=()=>{currentCompany=companies.find(c=>c.id===b.dataset.companyCard);renderCompanyPicker();loadCompanyData();});
+  $$('[data-delete-company]',grid).forEach(b=>b.onclick=async()=>{
     const company=companies.find(c=>c.id===b.dataset.deleteCompany);if(!company)return;
     const confirmed=await confirmDialog(`¿Eliminar la empresa «${company.name}»? Se borrarán definitivamente sus avisos, landings, campos, tarifas, usuarios e integraciones. Esta acción no se puede deshacer.`);
     if(!confirmed)return;
@@ -593,7 +601,7 @@ function renderCompanyPage() {
     const {error}=await db.from('companies').delete().eq('id',company.id);
     if(error){b.disabled=false;toast(errorText(error),'No se pudo eliminar la empresa');return;}
     companies=companies.filter(c=>c.id!==company.id);
-    if(currentCompany?.id===company.id)currentCompany=companies[0];
+    if(currentCompany?.id===company.id){currentCompany=companies[0];}
     toast(`La empresa «${company.name}» y sus datos se han eliminado.`,'Empresa eliminada');
     renderCompanyPage();
     await loadMemberships();
