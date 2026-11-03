@@ -49,6 +49,10 @@ async function confirmDialog(message) {
   const answer=await formDialog({title:'Confirmar acción',description:message,fields:[],confirmText:'Confirmar'});
   return answer!==null;
 }
+function setConnectionError(message) {
+  const box=$('#connectionError');if(!box)return;
+  box.textContent=message||'';box.hidden=!message;
+}
 function errorText(error) { return error?.message || error?.details || String(error || 'Error desconocido'); }
 function formatDate(iso) { return new Date(iso).toLocaleString('es-ES',{dateStyle:'short',timeStyle:'short'}); }
 function dateOnly(iso) { return new Date(iso).toLocaleDateString('en-CA'); }
@@ -176,10 +180,16 @@ async function loadCompanyData() {
     if(!fields.length){const seeds=defaultFields.map(f=>({...f,company_id:c}));const {data:createdFields,error}=await db.from('notice_fields').insert(seeds).select();if(error)throw error;fields=createdFields||[];}
     if(!realtimeChannel){realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();toast(`Landing: ${landingName(payload.new.landing_id)} · ${payload.new.device||'Nuevo aviso'}`,'Nuevo aviso recibido');}}).subscribe();}
     else {await db.removeChannel(realtimeChannel);realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();toast(`Landing: ${landingName(payload.new.landing_id)} · ${payload.new.device||'Nuevo aviso'}`,'Nuevo aviso recibido');}}).subscribe();}
-    $$('.demo-banner').forEach(el=>el.remove());
+    $('.demo-banner').forEach(el=>el.remove());setConnectionError('');
     renderLandingOptions();renderRows();renderReport();renderFields();renderPriceRules();renderCompanyPage();renderMembers();renderIntegrations();renderSettings();
     mountSignOut();
-  } catch(error) { toast('No se pudieron cargar los datos: '+errorText(error),'Error de conexión'); }
+  } catch(error) {
+    landings=[];notices=[];tariffs=[];fields=[];
+    $('.demo-banner').forEach(el=>el.remove());
+    renderLandingOptions();renderRows();renderReport();renderFields();renderPriceRules();renderCompanyPage();renderMembers();renderIntegrations();renderSettings();
+    const message='No se pudieron cargar los datos de esta empresa: '+errorText(error);
+    setConnectionError(message);toast(message,'Error de conexión');
+  }
 }
 function landingName(id) { return landings.find(l=>l.id===id)?.name||'Entrada manual'; }
 function landingOptions(selected='') { return '<option value="">Sin landing</option>'+landings.filter(l=>l.is_active).map(l=>`<option value="${l.id}" ${selected===l.id?'selected':''}>${esc(l.name)}</option>`).join(''); }
@@ -358,7 +368,10 @@ async function renderSettings() {
     const input=$('input[value="Global Técnicos"]',article)||$('input',article); if(input)input.value=currentCompany.name;
     const color=$('input[type=color]',article);if(color)color.value=currentCompany.primary_color||'#5267e8';
     if(currentCompany.logo_path&&$('.company-logo',article)==null){const img=document.createElement('img');img.src=currentCompany.logo_path;img.className='company-logo';img.style='max-width:140px;max-height:60px;display:block;margin:10px 0';article.append(img);}
-    if(!$('#uploadLogo')){const b=document.createElement('button');b.id='uploadLogo';b.className='outline-btn';b.textContent='Subir logo';const file=document.createElement('input');file.type='file';file.accept='image/png,image/jpeg,image/webp,image/svg+xml';file.id='logoFile';file.style='display:block;margin:10px 0;max-width:100%';file.setAttribute('aria-label','Seleccionar archivo de logo');article.append(file,b);b.onclick=()=>file.click();file.onchange=uploadLogo;}
+    let file=$('#logoFile',article),button=$('#uploadLogo',article);
+    if(!file){file=document.createElement('input');file.type='file';file.accept='image/png,image/jpeg,image/webp,image/svg+xml';file.id='logoFile';file.style='display:block;margin:10px 0;max-width:100%';file.setAttribute('aria-label','Seleccionar archivo de logo');article.append(file);}
+    if(!button){button=document.createElement('button');button.id='uploadLogo';button.className='outline-btn';button.textContent='Subir logo';article.append(button);}
+    button.onclick=()=>file.click();file.onchange=uploadLogo;
   }
   renderFields();renderPriceRules();
 }
@@ -492,5 +505,5 @@ async function exportCsv(report=false) {
   const csv=[columns,...rows.map(n=>[formatDate(n.received_at),n.status,n.customer_name,n.phone,n.email||'',landingName(n.landing_id),n.device||'',n.category||'',n.locality||'',n.postal_code||'',n.brand||'',n.issue||'',n.status==='Sale'?n.unit_price:'',...fields.filter(f=>f.visible_in_table).map(f=>n.custom_fields?.[f.field_key]??n[f.field_key]??'')])].map(r=>r.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(',')).join('\r\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));a.download='avisos-'+new Date().toISOString().slice(0,10)+'.csv';a.click();URL.revokeObjectURL(a.href);
 }
-document.addEventListener('DOMContentLoaded',()=>{wireUI();openAuth();if(!db)return;db.auth.getSession().then(({data,error})=>{if(error){$('#authError').textContent=errorText(error);return;}if(data.session){user=data.session.user;loadMemberships().catch(e=>$('#authError').textContent=errorText(e));}});db.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_IN'&&session){user=session.user;setTimeout(()=>loadMemberships().catch(e=>{$('#authError').textContent=errorText(e);openAuth();}),0);}if(event==='SIGNED_OUT'){user=null;location.reload();}});});
+document.addEventListener('DOMContentLoaded',()=>{wireUI();openAuth();if(!db)return;db.auth.getSession().then(({data,error})=>{if(error){$('#authError').textContent=errorText(error);return;}if(data.session){user=data.session.user;loadMemberships().catch(e=>{const message='No se pudo cargar tu empresa: '+errorText(e);setConnectionError(message);if($('#authError'))$('#authError').textContent=message;});}});db.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_IN'&&session){user=session.user;setTimeout(()=>loadMemberships().catch(e=>{const message='No se pudo cargar tu empresa: '+errorText(e);setConnectionError(message);if($('#authError'))$('#authError').textContent=message;openAuth();}),0);}if(event==='SIGNED_OUT'){user=null;location.reload();}});});
 
