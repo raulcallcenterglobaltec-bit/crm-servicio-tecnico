@@ -154,7 +154,6 @@ function renderCompanyPicker() {
   old.replaceWith(select);
   $('#companySwitch').innerHTML=companies.map(c=>`<option value="${c.id}" ${c.id===currentCompany.id?'selected':''}>${esc(c.name)}</option>`).join('');
   $('#companySwitch').addEventListener('change',async e=>{currentCompany=companies.find(c=>c.id===e.target.value);await loadCompanyData();});
-  $('#companyName').textContent=currentCompany.name;
   document.documentElement.style.setProperty('--accent',currentCompany.primary_color||'#5267e8');
 }
 async function fetchAllNotices(companyId) {
@@ -369,7 +368,7 @@ async function renderSettings() {
     const color=$('input[type=color]',article);if(color)color.value=currentCompany.primary_color||'#5267e8';
     if(currentCompany.logo_path&&$('.company-logo',article)==null){const img=document.createElement('img');img.src=currentCompany.logo_path;img.className='company-logo';img.style='max-width:140px;max-height:60px;display:block;margin:10px 0';article.append(img);}
     let file=$('#logoFile',article),button=$('#uploadLogo',article);
-    if(!file){file=document.createElement('input');file.type='file';file.accept='image/png,image/jpeg,image/webp,image/svg+xml';file.id='logoFile';file.style='display:block;margin:10px 0;max-width:100%';file.setAttribute('aria-label','Seleccionar archivo de logo');article.append(file);}
+    if(!file){file=document.createElement('input');file.type='file';file.accept='image/png,image/jpeg,image/webp,image/svg+xml';file.id='logoFile';file.style='position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none';file.setAttribute('aria-label','Seleccionar archivo de logo');article.append(file);}
     if(!button){button=document.createElement('button');button.id='uploadLogo';button.className='outline-btn';button.textContent='Subir logo';article.append(button);}
     button.onclick=()=>file.click();file.onchange=uploadLogo;
   }
