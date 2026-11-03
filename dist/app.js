@@ -43,7 +43,7 @@ function formDialog({title,description='',fields=[],confirmText='Guardar'}) {
 function infoDialog(title,content) {
   const backdrop=document.createElement('div');backdrop.className='modal-backdrop open';backdrop.style.zIndex='120';
   backdrop.innerHTML=`<div class="modal" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>${esc(title)}</h2></div><button class="close" type="button">×</button></div><pre style="white-space:pre-wrap;font:13px/1.6 inherit;color:#465268">${esc(content)}</pre><div class="modal-actions"><button class="primary-btn" type="button">Cerrar</button></div></div>`;
-  document.body.append(backdrop);$('.close, .primary-btn',backdrop).forEach(b=>b.onclick=()=>backdrop.remove());backdrop.onclick=e=>{if(e.target===backdrop)backdrop.remove();};
+  document.body.append(backdrop);$$('.close, .primary-btn',backdrop).forEach(b=>b.onclick=()=>backdrop.remove());backdrop.onclick=e=>{if(e.target===backdrop)backdrop.remove();};
 }
 async function confirmDialog(message) {
   const answer=await formDialog({title:'Confirmar acción',description:message,fields:[],confirmText:'Confirmar'});
@@ -179,12 +179,12 @@ async function loadCompanyData() {
     if(!fields.length){const seeds=defaultFields.map(f=>({...f,company_id:c}));const {data:createdFields,error}=await db.from('notice_fields').insert(seeds).select();if(error)throw error;fields=createdFields||[];}
     if(!realtimeChannel){realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();toast(`Landing: ${landingName(payload.new.landing_id)} · ${payload.new.device||'Nuevo aviso'}`,'Nuevo aviso recibido');}}).subscribe();}
     else {await db.removeChannel(realtimeChannel);realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();toast(`Landing: ${landingName(payload.new.landing_id)} · ${payload.new.device||'Nuevo aviso'}`,'Nuevo aviso recibido');}}).subscribe();}
-    $('.demo-banner').forEach(el=>el.remove());setConnectionError('');
+    $$('.demo-banner').forEach(el=>el.remove());setConnectionError('');
     renderLandingOptions();renderRows();renderReport();renderFields();renderPriceRules();renderCompanyPage();renderMembers();renderIntegrations();renderSettings();
     mountSignOut();
   } catch(error) {
     landings=[];notices=[];tariffs=[];fields=[];
-    $('.demo-banner').forEach(el=>el.remove());
+    $$('.demo-banner').forEach(el=>el.remove());
     renderLandingOptions();renderRows();renderReport();renderFields();renderPriceRules();renderCompanyPage();renderMembers();renderIntegrations();renderSettings();
     const message='No se pudieron cargar los datos de esta empresa: '+errorText(error);
     setConnectionError(message);toast(message,'Error de conexión');
@@ -410,7 +410,7 @@ function renderCompanyPage() {
   const section=$('#page-empresas');if(!section)return;
   let grid=$('.simple-grid',section);if(!grid)return;
   grid.innerHTML=companies.map(c=>`<button class="placeholder-tile" data-company-card="${c.id}" style="text-align:left;cursor:pointer"><div class="company-badge">${esc(c.name.slice(0,2).toUpperCase())}</div><strong>${esc(c.name)}</strong><small>${c.id===currentCompany.id?'Empresa actual':'Cambiar a esta empresa'}</small></button>`).join('')||'<div class="empty">Crea tu primera empresa.</div>';
-  $('[data-company-card]',grid).forEach(b=>b.onclick=()=>{currentCompany=companies.find(c=>c.id===b.dataset.companyCard);renderCompanyPicker();loadCompanyData();});
+  $$('[data-company-card]',grid).forEach(b=>b.onclick=()=>{currentCompany=companies.find(c=>c.id===b.dataset.companyCard);renderCompanyPicker();loadCompanyData();});
 }
 function renderMembers() {
   const section=$('#page-usuarios');if(!section)return;
