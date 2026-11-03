@@ -444,6 +444,7 @@ async function createNotice(event) {
   notices.unshift(data);$('#modal').classList.remove('open');event.target.reset();renderRows();
   toast(`Teléfono · ${data.device||'Aviso'} · ${formatDate(data.received_at)}`,'Nuevo aviso recibido');
   db.functions.invoke('notify-notice',{body:{notice_id:data.id}}).catch(()=>{});
+  db.functions.invoke('notify-whatsapp-notice',{body:{notice_id:data.id}}).catch(()=>{});
 }
 function showSettingsTab(name) {
   $$('[data-settings-tab]').forEach(button=>button.classList.toggle('active',button.dataset.settingsTab===name));
