@@ -6,7 +6,7 @@ const $$ = (s, root=document) => [...root.querySelectorAll(s)];
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = value => Number(value || 0).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
 const categoryFor = device => /aire acondicionado|aerotermia|bomba de calor|acs|caldera|calentador|termo/i.test(String(device||'')) ? 'Clima' : (device ? 'Gama blanca' : null);
-let user=null, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null;
+let user=null, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, noticeSource='landing';
 let authMode='login', selectedDate=new Date().toISOString().slice(0,10);
 const defaultFields=[
   {field_key:'customer_name',label:'Nombre y apellidos',field_type:'text',required:true,visible_in_form:true,visible_in_table:true,position:1},
@@ -222,9 +222,10 @@ function filteredNotices(report=false) {
   const landing=report?'all':$('#landingFilter').value;
   const query=(report?'':($('#tableSearch').value||$('#globalSearch').value)).toLowerCase();
   return notices.filter(n=>{
+    const sourceMatch=report||((n.created_by?'phone':'landing')===noticeSource);
     const d=dateOnly(n.received_at), day=new Date(d+'T12:00:00').getDay();
     const allText=[n.customer_name,n.phone,n.email,n.device,n.brand,n.issue,n.locality,landingName(n.landing_id),JSON.stringify(n.custom_fields||{})].join(' ').toLowerCase();
-    return inDatePeriod(d,period,exact,from,to)&&(weekday==='all'||day===Number(weekday))&&(status==='all'||n.status===status)&&(landing==='all'||n.landing_id===landing)&&(!query||allText.includes(query));
+    return sourceMatch&&inDatePeriod(d,period,exact,from,to)&&(weekday==='all'||day===Number(weekday))&&(status==='all'||n.status===status)&&(landing==='all'||n.landing_id===landing)&&(!query||allText.includes(query));
   });
 }
 function renderRows() {
@@ -457,10 +458,21 @@ function showLandingCode(landing) {
 }
 
 function showPage(name) {
-  $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+name));
-  $$('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
-  const labels={avisos:'Avisos',informes:'Informes',empresas:'Empresas',usuarios:'Usuarios y permisos',configuracion:'Configuración',integraciones:'Integraciones'};
-  $('#breadcrumb').textContent='Panel / '+labels[name];$('#sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'});
+  const pageName=(name==='avisos-landing'||name==='avisos-phone')?'avisos':name;
+  $('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+pageName));
+  $('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
+  const labels={'avisos-landing':'Avisos por landing','avisos-phone':'Avisos por teléfono',informes:'Informes',empresas:'Empresas',usuarios:'Usuarios y permisos',configuracion:'Configuración',integraciones:'Integraciones'};
+  $('#breadcrumb').textContent='Panel / '+labels[name];
+  if(pageName==='avisos'){
+    noticeSource=name==='avisos-phone'?'phone':'landing';
+    const phone=noticeSource==='phone';
+    $('#page-avisos h1').textContent=phone?'Avisos por teléfono':'Avisos por landing';
+    $('#page-avisos .page-head p').textContent=phone?'Registra y gestiona los avisos que recibes por llamada telefónica.':'Solicitudes recibidas desde los formularios de tus landings.';
+    $('#newNotice').style.display=phone?'inline-flex':'none';
+    $('#latestNoticesTitle').textContent=phone?'Últimos avisos por teléfono':'Últimos avisos de landing';
+    renderRows();
+  }
+  $('#sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'});
 }
 function wireUI() {
   $('#sidebar').addEventListener('click',event=>{const button=event.target.closest('button[data-page]');if(button){event.preventDefault();showPage(button.dataset.page);}});
