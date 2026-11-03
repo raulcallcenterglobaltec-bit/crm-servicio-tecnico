@@ -10,13 +10,13 @@ let user=null, companies=[], currentCompany=null, landings=[], notices=[], tarif
 let fieldEditorRows=[];
 let authMode='login', selectedDate=new Date().toISOString().slice(0,10);
 const defaultFields=[
-  {field_key:'customer_name',label:'Nombre y apellidos',field_type:'text',required:true,visible_in_form:true,visible_in_table:true,position:1},
-  {field_key:'phone',label:'Teléfono',field_type:'phone',required:true,visible_in_form:true,visible_in_table:true,position:2},
-  {field_key:'locality',label:'Localidad',field_type:'text',required:false,visible_in_form:true,visible_in_table:false,position:3},
-  {field_key:'postal_code',label:'Código postal',field_type:'text',required:false,visible_in_form:true,visible_in_table:false,position:4},
-  {field_key:'device',label:'Aparato',field_type:'select',required:true,visible_in_form:true,visible_in_table:true,options:['Aire acondicionado','Caldera','Calentador de gas','Termo eléctrico','Lavadora','Lavavajillas','Frigorífico','Secadora','Horno','Otro'],position:5},
-  {field_key:'brand',label:'Marca del aparato',field_type:'text',required:false,visible_in_form:true,visible_in_table:false,position:6},
-  {field_key:'issue',label:'Avería o comentario',field_type:'textarea',required:false,visible_in_form:true,visible_in_table:false,position:7}
+  {field_key:'customer_name',label:'Nombre y apellidos',field_type:'text',required:true,visible_in_form:true,visible_in_table:true,visible_on_card:true,position:1},
+  {field_key:'phone',label:'Teléfono',field_type:'phone',required:true,visible_in_form:true,visible_in_table:true,visible_on_card:true,position:2},
+  {field_key:'locality',label:'Localidad',field_type:'text',required:false,visible_in_form:true,visible_in_table:false,visible_on_card:false,position:3},
+  {field_key:'postal_code',label:'Código postal',field_type:'text',required:false,visible_in_form:true,visible_in_table:false,visible_on_card:false,position:4},
+  {field_key:'device',label:'Aparato',field_type:'select',required:true,visible_in_form:true,visible_in_table:true,visible_on_card:true,options:['Aire acondicionado','Caldera','Calentador de gas','Termo eléctrico','Lavadora','Lavavajillas','Frigorífico','Secadora','Horno','Otro'],position:5},
+  {field_key:'brand',label:'Marca del aparato',field_type:'text',required:false,visible_in_form:true,visible_in_table:false,visible_on_card:false,position:6},
+  {field_key:'issue',label:'Avería o comentario',field_type:'textarea',required:false,visible_in_form:true,visible_in_table:false,visible_on_card:false,position:7}
 ];
 function toast(message, title='Aviso') {
   const el=$('#toast'); if(!el) return;
@@ -252,19 +252,18 @@ function noticeFieldsForCards() {
   const byKey=new Map();for(const f of sourceFields)if(!byKey.has(f.field_key)||f.landing_id===landingFilter)byKey.set(f.field_key,f);
   return [...byKey.values()].sort((a,b)=>a.position-b.position);
 }
-function cardFieldsStorageKey(){return `crm-service-card-fields:${currentCompany?.id||'none'}:${noticeSource}:${$('#landingFilter')?.value||'all'}`;}
 function selectedCardFields() {
-  const available=noticeFieldsForCards(),stored=localStorage.getItem(cardFieldsStorageKey());
-  if(stored){try{return JSON.parse(stored).filter(key=>available.some(f=>f.field_key===key));}catch{}}
-  return available.filter(f=>f.visible_in_table).map(f=>f.field_key);
+  return noticeFieldsForCards().filter(f=>f.visible_on_card!==false&&f.field_key!=='customer_name').map(f=>f.field_key);
 }
 function renderCardFieldPanel() {
   const panel=$('#cardFieldPanel');if(!panel)return;
   const chosen=selectedCardFields();
-  panel.innerHTML=noticeFieldsForCards().map(f=>`<label><input type="checkbox" data-card-field="${esc(f.field_key)}" ${chosen.includes(f.field_key)?'checked':''}/> ${esc(f.label)}</label>`).join('')||'<span style="font-size:11px;color:#8993a4">No hay campos disponibles para mostrar.</span>';
-  $$('[data-card-field]',panel).forEach(input=>input.addEventListener('change',()=>{
-    const next=$$('[data-card-field]:checked',panel).map(x=>x.dataset.cardField);
-    localStorage.setItem(cardFieldsStorageKey(),JSON.stringify(next));renderKanban(filteredNotices(false));
+  panel.innerHTML='<span style="grid-column:1/-1;font-size:10px;color:#8993a4">Nombre, origen y fecha se muestran siempre.</span>'+noticeFieldsForCards().filter(f=>f.field_key!=='customer_name').map(f=>`<label><input type="checkbox" data-card-field="${esc(f.id)}" ${chosen.includes(f.field_key)?'checked':''}/> ${esc(f.label)}</label>`).join('');
+  $$('[data-card-field]',panel).forEach(input=>input.addEventListener('change',async event=>{
+    const field=fields.find(f=>f.id===event.target.dataset.cardField);if(!field)return;
+    const {data,error}=await db.from('notice_fields').update({visible_on_card:event.target.checked}).eq('id',field.id).select().single();
+    if(error){toast(errorText(error),'No se pudo guardar');renderCardFieldPanel();return;}
+    Object.assign(field,data);renderRows();
   }));
 }
 function setNoticeView(view) {
@@ -286,7 +285,7 @@ function renderKanban(rows) {
         return value!==''&&value!==null&&value!==undefined?`<span><b>${esc(f.label)}:</b> ${esc(value)}</span>`:'';
       }).filter(Boolean).join('');
       const origin=n.created_by?'Teléfono':landingName(n.landing_id);
-      return `<article class="notice-card" draggable="true" data-card-id="${esc(n.id)}"><div class="notice-card-head"><div><strong>${esc(customer)}</strong><small>${esc(n.phone||'Sin teléfono')}</small></div><button type="button" class="row-action" data-open-card="${esc(n.id)}" aria-label="Ver aviso">···</button></div><div class="notice-card-fields">${details}<span><b>Origen:</b> ${esc(origin)}</span><span><b>Recibido:</b> ${esc(formatDate(n.received_at))}</span></div><div class="notice-card-foot"><select data-card-status="${esc(n.id)}" aria-label="Cambiar estado del aviso">${['Nuevo','Sale','No sale'].map(s=>`<option value="${s}" ${s===status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select>${status==='Sale'&&!n.created_by?`<small>${money(getUnitPrice(n))}</small>`:''}</div></article>`;
+      return `<article class="notice-card" draggable="true" data-card-id="${esc(n.id)}"><div class="notice-card-head"><div><strong>${esc(customer)}</strong></div><button type="button" class="row-action" data-open-card="${esc(n.id)}" aria-label="Ver aviso">···</button></div><div class="notice-card-fields">${details}<span><b>Origen:</b> ${esc(origin)}</span><span><b>Recibido:</b> ${esc(formatDate(n.received_at))}</span></div><div class="notice-card-foot"><select data-card-status="${esc(n.id)}" aria-label="Cambiar estado del aviso">${['Nuevo','Sale','No sale'].map(s=>`<option value="${s}" ${s===status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select>${status==='Sale'&&!n.created_by?`<small>${money(getUnitPrice(n))}</small>`:''}</div></article>`;
     }).join('');
     return `<section class="kanban-column" data-drop-status="${status}"><div class="kanban-column-head"><span>${labels[status]}</span><span class="kanban-count">${rows.filter(n=>(n.status||'Nuevo')===status).length}</span></div><div class="kanban-list">${cards||'<div class="empty" style="padding:22px 8px;font-size:10px">Arrastra un aviso aquí</div>'}</div></section>`;
   }).join('');
@@ -395,11 +394,12 @@ async function renderFields() {
   const description=$('#fieldEditorDescription');if(description)description.textContent=fieldScope==='phone'?'Configura los datos de los avisos que se reciben por teléfono.':'Los campos generales se aplican a todas las landing. Selecciona una landing para configurar sus campos específicos.';
   const landingWrap=$('#landingFieldControls');if(landingWrap)landingWrap.hidden=fieldScope==='phone';
   const typeNames={text:'Texto',phone:'Teléfono',email:'Correo',number:'Número',date:'Fecha',select:'Lista',textarea:'Texto largo',checkbox:'Casilla'};
-  list.innerHTML=fieldEditorRows.map((f,i)=>`<div class="field-row" style="grid-template-columns:minmax(125px,1fr) 100px auto auto auto auto auto;gap:6px"><input data-field-label="${i}" aria-label="Nombre del campo" value="${esc(f.label)}"/><select data-field-type="${i}" aria-label="Tipo de campo">${Object.entries(typeNames).map(([key,label])=>`<option value="${key}" ${f.field_type===key?'selected':''}>${label}</option>`).join('')}</select><label><input type="checkbox" data-field-required="${i}" ${f.required?'checked':''}/> Obligatorio</label><label><input type="checkbox" data-field-table="${i}" ${f.visible_in_table?'checked':''}/> Columna</label><label><input type="checkbox" data-field-form="${i}" ${f.visible_in_form?'checked':''}/> Formulario</label><small>${f.landing_id?esc(landingName(f.landing_id)):'Todas'}</small><button class="mini-delete" data-field-delete="${i}" aria-label="Eliminar campo">×</button></div>`).join('')||'<div class="empty">No hay campos exclusivos en esta selección. Los campos generales se mantienen si has seleccionado una landing.</div>';
+  list.innerHTML=fieldEditorRows.map((f,i)=>`<div class="field-row" style="grid-template-columns:minmax(125px,1fr) 100px auto auto auto auto auto auto;gap:6px"><input data-field-label="${i}" aria-label="Nombre del campo" value="${esc(f.label)}"/><select data-field-type="${i}" aria-label="Tipo de campo">${Object.entries(typeNames).map(([key,label])=>`<option value="${key}" ${f.field_type===key?'selected':''}>${label}</option>`).join('')}</select><label><input type="checkbox" data-field-required="${i}" ${f.required?'checked':''}/> Obligatorio</label><label><input type="checkbox" data-field-table="${i}" ${f.visible_in_table?'checked':''}/> Columna</label><label><input type="checkbox" data-field-card-config="${i}" ${f.visible_on_card?'checked':''} ${f.field_key==='customer_name'?'disabled':''}/> Tarjeta</label><label><input type="checkbox" data-field-form="${i}" ${f.visible_in_form?'checked':''}/> Formulario</label><small>${f.landing_id?esc(landingName(f.landing_id)):'Todas'}</small><button class="mini-delete" data-field-delete="${i}" aria-label="Eliminar campo">×</button></div>`).join('')||'<div class="empty">No hay campos exclusivos en esta selección. Los campos generales se mantienen si has seleccionado una landing.</div>';
   $$('[data-field-label]').forEach(x=>x.addEventListener('change',async e=>{const i=+e.target.dataset.fieldLabel,label=e.target.value.trim();if(!label){e.target.value=fieldEditorRows[i].label;return;}await saveField(i,{label});}));
   $$('[data-field-type]').forEach(x=>x.addEventListener('change',async e=>{const i=+e.target.dataset.fieldType,field_type=e.target.value;let options=fieldEditorRows[i].options||[];if(field_type==='select'){const answer=await formDialog({title:'Opciones del campo',description:'Escribe las opciones separadas por comas.',fields:[{key:'options',label:'Opciones',type:'text',value:options.join(', '),required:true}]});if(!answer){renderFields();return;}options=answer.options.split(',').map(v=>v.trim()).filter(Boolean);}await saveField(i,{field_type,options});}));
   $$('[data-field-required]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldRequired,{required:e.target.checked})));
   $$('[data-field-table]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldTable,{visible_in_table:e.target.checked})));
+  $$('[data-field-card-config]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldCardConfig,{visible_on_card:e.target.checked})));
   $$('[data-field-form]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldForm,{visible_in_form:e.target.checked})));
   $$('[data-field-delete]').forEach(x=>x.addEventListener('click',async e=>{const f=fieldEditorRows[+e.target.dataset.fieldDelete];if(!await confirmDialog(`¿Eliminar el campo «${f.label}» de futuras entradas?`))return;const {error}=await db.from('notice_fields').delete().eq('id',f.id);if(error)toast(errorText(error),'Error');else{fields=fields.filter(x=>x.id!==f.id);renderFields();renderRows();renderExtraFields();}}));
 }
@@ -599,7 +599,7 @@ async function addField() {
   const key=label.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
   let options=[];if(field_type==='select'){const answer=await formDialog({title:'Opciones del campo',description:'Escribe las opciones separadas por comas.',fields:[{key:'options',label:'Opciones',type:'text',required:true}]});if(!answer)return;options=answer.options.split(',').map(x=>x.trim()).filter(Boolean);}
   const landing_id=fieldScope==='landing'?($('#newFieldLanding')?.value||null):null;
-  const {data,error}=await db.from('notice_fields').insert({company_id:currentCompany.id,landing_id,channel:fieldScope,field_key:key,label,field_type,options,required:false,visible_in_form:true,visible_in_table:true,position:fieldEditorRows.length+1}).select().single();
+  const {data,error}=await db.from('notice_fields').insert({company_id:currentCompany.id,landing_id,channel:fieldScope,field_key:key,label,field_type,options,required:false,visible_in_form:true,visible_in_table:true,visible_on_card:true,position:fieldEditorRows.length+1}).select().single();
   if(error){toast(errorText(error),'No se pudo añadir');return;}fields.push(data);$('#newFieldName').value='';renderFields();renderRows();renderExtraFields();
 }
 async function addTariff() {
