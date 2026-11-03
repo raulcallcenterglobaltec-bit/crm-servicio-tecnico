@@ -30,7 +30,7 @@ function formDialog({title,description='',fields=[],confirmText='Guardar'}) {
       let control;
       if(f.type==='select')control=`<select name="${key}" ${required}>${(f.options||[]).map(o=>{const v=typeof o==='string'?o:o.value,l=typeof o==='string'?o:o.label;return `<option value="${esc(v)}" ${String(v)===String(f.value??'')?'selected':''}>${esc(l)}</option>`;}).join('')}</select>`;
       else if(f.type==='textarea')control=`<textarea name="${key}" rows="3" ${required} placeholder="${esc(f.placeholder||'')}">${value}</textarea>`;
-      else control=`<input name="${key}" type="${esc(f.type||'text')}" value="${value}" ${required} placeholder="${esc(f.placeholder||'')}" ${f.autocomplete? `autocomplete="${esc(f.autocomplete)}"`:''}/>`;
+      else control=`<input name="${key}" type="${esc(f.type||'text')}" value="${value}" ${required} placeholder="${esc(f.placeholder||'')}" ${f.autocomplete?`autocomplete="${esc(f.autocomplete)}"`:''}/>`;
       return `<label class="field" style="margin:12px 0"><span>${label}</span>${control}</label>`;
     }).join('');
     backdrop.innerHTML=`<form class="modal" style="max-height:90vh;overflow:auto" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>${esc(title)}</h2><p>${esc(description)}</p></div><button class="close" type="button" data-dialog-cancel aria-label="Cerrar">×</button></div>${controls}<div class="modal-actions"><button class="outline-btn" type="button" data-dialog-cancel>Cancelar</button><button class="primary-btn" type="submit">${esc(confirmText)}</button></div></form>`;
@@ -358,7 +358,7 @@ async function renderSettings() {
     const input=$('input[value="Global Técnicos"]',article)||$('input',article); if(input)input.value=currentCompany.name;
     const color=$('input[type=color]',article);if(color)color.value=currentCompany.primary_color||'#5267e8';
     if(currentCompany.logo_path&&$('.company-logo',article)==null){const img=document.createElement('img');img.src=currentCompany.logo_path;img.className='company-logo';img.style='max-width:140px;max-height:60px;display:block;margin:10px 0';article.append(img);}
-    if(!$('#uploadLogo')){const b=document.createElement('button');b.id='uploadLogo';b.className='outline-btn';b.textContent='Subir logo';const file=document.createElement('input');file.type='file';file.accept='image/png,image/jpeg,image/webp,image/svg+xml';file.id='logoFile';file.style='display:block;margin:10px 0;max-width:100%';file.setAttribute('aria-label','Seleccionar archivo de logo');b.textContent='Subir logo';article.append(file,b);b.onclick=()=>file.click();file.onchange=uploadLogo;}
+    if(!$('#uploadLogo')){const b=document.createElement('button');b.id='uploadLogo';b.className='outline-btn';b.textContent='Subir logo';const file=document.createElement('input');file.type='file';file.accept='image/png,image/jpeg,image/webp,image/svg+xml';file.id='logoFile';file.style='display:block;margin:10px 0;max-width:100%';file.setAttribute('aria-label','Seleccionar archivo de logo');article.append(file,b);b.onclick=()=>file.click();file.onchange=uploadLogo;}
   }
   renderFields();renderPriceRules();
 }
@@ -420,3 +420,64 @@ async function configureIntegration(kind) {
   const {error}=await db.functions.invoke('manage-integration',{body:{company_id:currentCompany.id,kind,config,enabled:true}});
   toast(error?errorText(error):'Integración guardada de forma privada.',error?'No se pudo guardar':'Conexión guardada');
 }
+async function testIntegration(kind) {
+  const {error}=await db.functions.invoke('notify-test',{body:{company_id:currentCompany.id,kind}});
+  toast(error?errorText(error):'Mensaje de prueba enviado.',error?'No se pudo enviar':'Prueba enviada');
+}
+function showLandingCode(landing) {
+  if(!landing)return;
+  const endpoint=CFG.url.replace(/\/$/,'')+'/functions/v1/service-form';
+  const code=`fetch('${endpoint}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({landing_key:'${landing.endpoint_key}',data:{customer_name:'Nombre',phone:'600000000',device:'Lavadora',issue:'Descripción de la avería'}})}).then(r=>r.json())`;
+  const backdrop=document.createElement('div');backdrop.className='modal-backdrop open';backdrop.innerHTML=`<div class="modal" style="max-width:640px"><div class="modal-head"><div><h2>Conectar ${esc(landing.name)}</h2><p>Endpoint y ejemplo de envío desde el formulario.</p></div><button class="close">×</button></div><p><strong>URL:</strong></p><div class="integration-code">${esc(endpoint)}</div><p><strong>Clave de landing:</strong></p><div class="integration-code">${esc(landing.endpoint_key)}</div><p><strong>Ejemplo JavaScript:</strong></p><div class="integration-code">${esc(code)}</div><div class="modal-actions"><button class="outline-btn" id="copyLandingCode">Copiar código</button><button class="primary-btn close-code">Cerrar</button></div></div>`;
+  document.body.append(backdrop);$('.close',backdrop).onclick=()=>backdrop.remove();$('.close-code',backdrop).onclick=()=>backdrop.remove();$('#copyLandingCode',backdrop).onclick=async()=>{await navigator.clipboard.writeText(code);toast('Código copiado.');};
+}
+
+function showPage(name) {
+  $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+name));
+  $$('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
+  const labels={avisos:'Avisos',informes:'Informes',empresas:'Empresas',usuarios:'Usuarios y permisos',configuracion:'Configuración',integraciones:'Integraciones'};
+  $('#breadcrumb').textContent='Panel / '+labels[name];$('#sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'});
+}
+function wireUI() {
+  $('#sidebar').addEventListener('click',event=>{const button=event.target.closest('button[data-page]');if(button){event.preventDefault();showPage(button.dataset.page);}});
+  setupDate('main');setupDate('report');
+  ['tableSearch','globalSearch'].forEach(id=>$('#'+id).addEventListener('input',renderRows));
+  ['statusFilter','landingFilter','weekdayFilter'].forEach(id=>$('#'+id).addEventListener('change',renderRows));
+  $('#reportWeekday').addEventListener('change',renderReport);
+  $('#newNotice').addEventListener('click',()=>{$('#fLanding').innerHTML=landingOptions();renderExtraFields();$('#modal').classList.add('open');$('#fName').focus();});
+  $('#fLanding').addEventListener('change',()=>{syncDefaultFields();renderExtraFields();});
+  $('#closeModal').addEventListener('click',()=>$('#modal').classList.remove('open'));
+  $('#cancelModal').addEventListener('click',()=>$('#modal').classList.remove('open'));
+  $('#modal').addEventListener('click',e=>{if(e.target.id==='modal')e.currentTarget.classList.remove('open');});
+  $('#noticeForm').addEventListener('submit',createNotice);
+  $('#menuToggle').addEventListener('click',()=>$('#sidebar').classList.toggle('open'));
+  $('#showToast').addEventListener('click',()=>toast('Los avisos nuevos aparecerán aquí al entrar desde una landing.','Notificaciones'));
+  $('#exportBtn').addEventListener('click',()=>exportCsv(false));$('#reportExport').addEventListener('click',()=>exportCsv(true));
+  $('#addField').addEventListener('click',addField);
+  $('#saveSettings').addEventListener('click',saveCompanySettings);
+  $('#addPrice').addEventListener('click',addTariff);
+}
+async function addField() {
+  const label=$('#newFieldName').value.trim();if(!label)return;
+  const field_type=({Texto:'text',Número:'number',Fecha:'date',Lista:'select',Casilla:'checkbox'})[$('#newFieldType').value]||'text';
+  const key=label.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
+  let options=[];if(field_type==='select'){const answer=await formDialog({title:'Opciones del campo',description:'Escribe las opciones separadas por comas.',fields:[{key:'options',label:'Opciones',type:'text',required:true}]});if(!answer)return;options=answer.options.split(',').map(x=>x.trim()).filter(Boolean);}
+  const landing_id=$('#newFieldLanding')?.value||null;
+  const {data,error}=await db.from('notice_fields').insert({company_id:currentCompany.id,landing_id,field_key:key,label,field_type,options,required:false,visible_in_form:true,visible_in_table:true,position:fields.length+1}).select().single();
+  if(error){toast(errorText(error),'No se pudo añadir');return;}fields.push(data);$('#newFieldName').value='';renderFields();renderRows();renderExtraFields();
+}
+async function addTariff() {
+  if(!landings.length){toast('Crea primero una landing.');return;}
+  const next=landings.flatMap(l=>['Gama blanca','Clima'].map(category=>({landing_id:l.id,category}))).find(candidate=>!tariffs.some(t=>t.landing_id===candidate.landing_id&&t.category===candidate.category));
+  if(!next){toast('Ya hay una tarifa para Gama blanca y Clima en cada landing.');return;}
+  const {data,error}=await db.from('tariffs').insert({...next,company_id:currentCompany.id,price:0}).select().single();
+  if(error){toast(errorText(error),'No se pudo crear tarifa');return;}tariffs.push(data);renderPriceRules();
+}
+async function exportCsv(report=false) {
+  const rows=filteredNotices(report);
+  const columns=['Recibido','Estado','Cliente','Teléfono','Correo','Landing','Aparato','Categoría','Localidad','Código postal','Marca','Avería','Importe',...fields.filter(f=>f.visible_in_table).map(f=>f.label)];
+  const csv=[columns,...rows.map(n=>[formatDate(n.received_at),n.status,n.customer_name,n.phone,n.email||'',landingName(n.landing_id),n.device||'',n.category||'',n.locality||'',n.postal_code||'',n.brand||'',n.issue||'',n.status==='Sale'?n.unit_price:'',...fields.filter(f=>f.visible_in_table).map(f=>n.custom_fields?.[f.field_key]??n[f.field_key]??'')])].map(r=>r.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(',')).join('\r\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));a.download='avisos-'+new Date().toISOString().slice(0,10)+'.csv';a.click();URL.revokeObjectURL(a.href);
+}
+document.addEventListener('DOMContentLoaded',()=>{wireUI();openAuth();if(!db)return;db.auth.getSession().then(({data,error})=>{if(error){$('#authError').textContent=errorText(error);return;}if(data.session){user=data.session.user;loadMemberships().catch(e=>$('#authError').textContent=errorText(e));}});db.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_IN'&&session){user=session.user;setTimeout(()=>loadMemberships().catch(e=>{$('#authError').textContent=errorText(e);openAuth();}),0);}if(event==='SIGNED_OUT'){user=null;location.reload();}});});
+
