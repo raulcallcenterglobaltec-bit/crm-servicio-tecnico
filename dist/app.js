@@ -163,7 +163,6 @@ async function fetchAllNotices(companyId) {
 }
 async function loadCompanyData() {
   if(!currentCompany)return;
-  $('#companyName').textContent=currentCompany.name;
   document.title=currentCompany.name+' · CRM Servicio Técnico';
   try {
     const c=currentCompany.id;
