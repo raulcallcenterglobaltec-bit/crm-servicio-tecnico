@@ -6,7 +6,7 @@ const $$ = (s, root=document) => [...root.querySelectorAll(s)];
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = value => Number(value || 0).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
 const categoryFor = device => /aire acondicionado|aerotermia|bomba de calor|acs|caldera|calentador|termo/i.test(String(device||'')) ? 'Clima' : (device ? 'Gama blanca' : null);
-let user=null, isSuperAdmin=false, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, noticeSource='landing', fieldScope='phone', noticeView='table', relatedNoticeMatch=null;
+let user=null, isSuperAdmin=false, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, noticeSource='landing', fieldScope='phone', noticeView='table', relatedNoticeMatch=null, selectedHistoryKey=null;
 let fieldEditorRows=[];
 let authMode='login', selectedDate=new Date().toISOString().slice(0,10);
 const defaultFields=[
@@ -213,15 +213,15 @@ async function loadCompanyData() {
     [landings,notices,tariffs,fields,members]=results.map(r=>r.data||[]);
     applyAccessPermissions();
     if(!fields.length){const seeds=['phone','landing'].flatMap(channel=>defaultFields.map(f=>({...f,channel,options:f.options||[],company_id:c})));const {data:createdFields,error}=await db.from('notice_fields').insert(seeds).select();if(error)throw error;fields=createdFields||[];}
-    if(!realtimeChannel){realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();}}).subscribe();}
-    else {await db.removeChannel(realtimeChannel);realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();}}).subscribe();}
+    if(!realtimeChannel){realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();renderComplaints();renderClientHistory();}}).subscribe();}
+    else {await db.removeChannel(realtimeChannel);realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();renderComplaints();renderClientHistory();}}).subscribe();}
     $$('.demo-banner').forEach(el=>el.remove());setConnectionError('');
-    renderLandingOptions();renderRows();renderReport();renderComplaints();renderFields();renderPriceRules();renderCompanyPage();renderMembers();renderIntegrations();renderSettings();
+    renderLandingOptions();renderRows();renderReport();renderComplaints();renderClientHistory();renderFields();renderPriceRules();renderCompanyPage();renderMembers();renderIntegrations();renderSettings();
     mountSignOut();
   } catch(error) {
     landings=[];notices=[];tariffs=[];fields=[];
     $$('.demo-banner').forEach(el=>el.remove());
-    renderLandingOptions();renderRows();renderReport();renderComplaints();renderFields();renderPriceRules();renderCompanyPage();renderMembers();renderIntegrations();renderSettings();
+    renderLandingOptions();renderRows();renderReport();renderComplaints();renderClientHistory();renderFields();renderPriceRules();renderCompanyPage();renderMembers();renderIntegrations();renderSettings();
     const message='No se pudieron cargar los datos de esta empresa: '+errorText(error);
     setConnectionError(message);toast(message,'Error de conexión');
   }
@@ -385,6 +385,71 @@ function renderComplaints() {
   body.innerHTML=rows.map(n=>`<tr><td>${esc(formatDate(n.received_at))}</td><td><div class="client-cell"><span class="client-initial">${esc((n.customer_name||'??').slice(0,2).toUpperCase())}</span><div><strong>${esc(n.customer_name||'Sin nombre')}</strong><small>${esc(n.locality||'')}</small></div></div></td><td>${esc(n.phone||'—')}</td><td><span class="source">${n.notice_type==='anulacion'?'Anulación':'Reclamación'}</span></td><td class="complaint-detail">${esc(n.issue||'—')}</td><td>${n.status==='Sale'?'Envío solicitado':n.status==='No sale'?'No es nuestra (cliente equivocado)':'Registro anterior'}</td><td><button class="row-action" data-complaint-detail="${esc(n.id)}" aria-label="Ver datos">···</button></td></tr>`).join('');
   $$('[data-complaint-detail]',body).forEach(button=>button.onclick=()=>showDetails(button.dataset.complaintDetail));
 }
+function historyCustomerKey(row) {
+  const phone=normalizePhoneForMatch(row.phone);
+  if(phone.length>=9)return 'phone:'+phone;
+  const name=String(row.customer_name||'').trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+  return name?'name:'+name:'record:'+row.id;
+}
+function clientHistoryGroups() {
+  const byId=new Map(notices.map(n=>[n.id,n])),groups=new Map();
+  for(const row of notices){
+    const parent=row.related_notice_id?byId.get(row.related_notice_id):null;
+    const base=parent||row,key=historyCustomerKey(base);
+    if(!groups.has(key))groups.set(key,{key,name:base.customer_name||row.customer_name||'Sin nombre',phone:base.phone||row.phone||'',records:[],searchText:'',latest:row.received_at});
+    const group=groups.get(key);
+    for(const item of [base,row])if(item&&!group.records.some(existing=>existing.id===item.id))group.records.push(item);
+    group.name=base.customer_name||group.name;
+    if(!group.phone)group.phone=row.phone||'';
+    if(new Date(row.received_at)>new Date(group.latest))group.latest=row.received_at;
+  }
+  for(const group of groups.values()){
+    group.records.sort((a,b)=>new Date(b.received_at)-new Date(a.received_at));
+    group.searchText=group.records.map(n=>[n.customer_name,n.phone,n.email,n.locality].join(' ')).join(' ').toLowerCase();
+    group.searchPhones=group.records.map(n=>normalizePhoneForMatch(n.phone)).filter(p=>p.length>=9);
+  }
+  return [...groups.values()].sort((a,b)=>new Date(b.latest)-new Date(a.latest));
+}
+function historyRecordStatus(row) {
+  if(row.notice_type==='aviso')return statusLabel(row.status||'Nuevo');
+  return row.status==='Sale'?'Envío solicitado':row.status==='No sale'?'No es nuestra (cliente equivocado)':'Pendiente';
+}
+function historyRecordType(row) {
+  if(row.notice_type==='anulacion')return 'Anulación';
+  if(row.notice_type==='reclamacion')return 'Reclamación';
+  return 'Aviso técnico';
+}
+function renderClientHistory() {
+  const results=$('#historyResults');if(!results)return;
+  const input=$('#historySearch'),query=(input?.value||'').trim(),needle=query.toLowerCase(),digits=normalizePhoneForMatch(query);
+  const groups=clientHistoryGroups();
+  if(query.length<2){selectedHistoryKey=null;results.innerHTML='<div class="empty">Introduce un teléfono o nombre para buscar.</div>';renderClientHistoryDetail(groups);return;}
+  const matches=groups.filter(group=>group.searchText.includes(needle)||(digits.length>=2&&group.searchPhones.some(phone=>phone.includes(digits))));
+  if(!matches.length){selectedHistoryKey=null;results.innerHTML='<div class="empty">No encontramos un cliente con esos datos.</div>';renderClientHistoryDetail(groups);return;}
+  if(!matches.some(group=>group.key===selectedHistoryKey))selectedHistoryKey=matches.length===1?matches[0].key:null;
+  results.innerHTML=matches.map(group=>{
+    const avisos=group.records.filter(n=>n.notice_type==='aviso').length,reclamaciones=group.records.filter(n=>n.notice_type==='reclamacion').length,anulaciones=group.records.filter(n=>n.notice_type==='anulacion').length;
+    return `<button type="button" class="history-result ${group.key===selectedHistoryKey?'active':''}" data-history-client="${esc(group.key)}"><span class="history-result-name">${esc(group.name)}</span><span class="history-result-phone">${esc(group.phone||'Sin teléfono')}</span><span class="history-result-counts"><span class="history-pill-notices">${avisos} avisos</span><span class="history-pill-complaints">${reclamaciones} reclamaciones</span><span>${anulaciones} anulaciones</span></span></button>`;
+  }).join('');
+  $$('[data-history-client]',results).forEach(button=>button.addEventListener('click',()=>{selectedHistoryKey=button.dataset.historyClient;renderClientHistory();}));
+  renderClientHistoryDetail(matches);
+}
+function renderClientHistoryDetail(availableGroups=clientHistoryGroups()) {
+  const host=$('#historyDetail');if(!host)return;
+  const group=availableGroups.find(item=>item.key===selectedHistoryKey);
+  if(!group){host.innerHTML='<article class="card empty">Selecciona un cliente para ver su historial.</article>';return;}
+  const records=group.records,roots=records.filter(n=>n.notice_type==='aviso').sort((a,b)=>new Date(b.received_at)-new Date(a.received_at)),rootIds=new Set(roots.map(n=>n.id));
+  const followups=records.filter(n=>n.notice_type==='reclamacion'||n.notice_type==='anulacion'),linked=followups.filter(n=>rootIds.has(n.related_notice_id)),unlinked=followups.filter(n=>!rootIds.has(n.related_notice_id));
+  const counts=`${roots.length} ${roots.length===1?'aviso':'avisos'} · ${followups.filter(n=>n.notice_type==='reclamacion').length} ${followups.filter(n=>n.notice_type==='reclamacion').length===1?'reclamación':'reclamaciones'} · ${followups.filter(n=>n.notice_type==='anulacion').length} ${followups.filter(n=>n.notice_type==='anulacion').length===1?'anulación':'anulaciones'}`;
+  const followupMarkup=row=>`<div class="history-followup-entry"><div class="history-record-head"><div><strong>${historyRecordType(row)} · ${esc(historyRecordStatus(row))}</strong><small>${esc(formatDate(row.received_at))}</small></div><button type="button" class="history-open-record" data-history-open="${esc(row.id)}">Ver ficha</button></div><p>${esc(row.issue||'Sin detalle indicado')}</p></div>`;
+  const noticeCards=roots.map(row=>{
+    const source=row.created_by?'Llamada telefónica':landingName(row.landing_id),children=linked.filter(child=>child.related_notice_id===row.id).sort((a,b)=>new Date(b.received_at)-new Date(a.received_at));
+    const details=[row.device&&`<span><b>Aparato:</b> ${esc(row.device)}</span>`,row.locality&&`<span><b>Localidad:</b> ${esc(row.locality)}</span>`,row.brand&&`<span><b>Marca:</b> ${esc(row.brand)}</span>`,row.issue&&`<span><b>Detalle:</b> ${esc(row.issue)}</span>`].filter(Boolean).join('');
+    return `<article class="card history-record-card"><div class="history-record-head"><div><strong>Aviso técnico · ${esc(row.device||'Aparato sin indicar')}</strong><small>${esc(formatDate(row.received_at))} · ${esc(source)}</small></div><button type="button" class="history-open-record" data-history-open="${esc(row.id)}">Ver ficha</button></div><div class="history-record-meta"><span class="history-pill">${esc(historyRecordStatus(row))}</span><span class="history-pill">${esc(row.category||'Categoría sin indicar')}</span>${row.unit_price>0?`<span class="history-pill">${money(row.unit_price)}</span>`:''}</div><div class="history-record-details">${details||'<span>Sin datos adicionales del aviso.</span>'}</div><div class="history-followups"><h3>Reclamaciones y anulaciones vinculadas (${children.length})</h3>${children.length?children.map(followupMarkup).join(''):'<div class="history-empty-inline">Este aviso todavía no tiene reclamaciones ni anulaciones vinculadas.</div>'}</div></article>`;
+  }).join('');
+  host.innerHTML=`<article class="card history-summary"><h2>${esc(group.name)}</h2><p>${esc(group.phone||'Sin teléfono')} · Historial completo de esta empresa</p><div class="history-summary-counts"><span class="history-pill history-pill-notices">${counts}</span><span class="history-pill">${records.length} registros en total</span></div></article>${noticeCards||'<article class="card empty">Este cliente todavía no tiene avisos técnicos registrados.</article>'}${unlinked.length?`<article class="history-unlinked"><h3>Reclamaciones o anulaciones sin aviso vinculado (${unlinked.length})</h3><p style="margin:0 0 7px;color:#7d6b48;font-size:10px">Estos registros se buscaron por el teléfono, pero no se vinculó un aviso concreto al registrarlos.</p>${unlinked.sort((a,b)=>new Date(b.received_at)-new Date(a.received_at)).map(followupMarkup).join('')}</article>`:''}`;
+  $$('[data-history-open]',host).forEach(button=>button.addEventListener('click',()=>showDetails(button.dataset.historyOpen)));
+}
 async function changeStatus(id,status) {
   if(!canManageCurrentNotices())return;
   const n=notices.find(x=>x.id===id);if(!n)return;
@@ -393,7 +458,7 @@ async function changeStatus(id,status) {
   const patch={status,managed_at:status==='Nuevo'?null:new Date().toISOString(),unit_price:status==='Sale'?Number(tariff?.price||0):0};
   const {data,error}=await db.from('notices').update(patch).eq('id',id).select().single();
   if(error){toast(errorText(error),'No se pudo guardar');renderRows();return;}
-  Object.assign(n,data);renderRows();
+  Object.assign(n,data);renderRows();renderComplaints();renderClientHistory();
   if(!wasSale&&status==='Sale'&&n.created_by&&!n.landing_id&&n.notice_type==='aviso')await sendNoticeToConfiguredIntegrations(n);
 }
 async function sendNoticeToConfiguredIntegrations(notice) {
@@ -604,11 +669,12 @@ async function createNotice(event) {
   $$('[data-custom-key]', $('#noticeForm')).forEach(el=>{const c=$('input,select,textarea',el);custom_fields[el.dataset.customKey]=c.type==='checkbox'?c.checked:c.value;});
   const category=categoryFor(device);
   const row={company_id:currentCompany.id,landing_id:null,notice_type:type,status:v('fStatus')||'Nuevo',customer_name:v('fName'),phone:v('fPhone'),email:$('#fEmail')?.value?.trim()||null,locality:v('fLocality')||null,postal_code:v('fPostal')||null,device:device||null,category:isPhoneNotice?category:null,brand:isPhoneNotice?(v('fBrand')||null):null,issue:v('fIssue')||null,custom_fields,unit_price:0,created_by:user.id};
+  if(!isPhoneNotice&&relatedNoticeMatch)row.related_notice_id=relatedNoticeMatch.id;
   if(row.status==='Sale'&&isPhoneNotice)row.unit_price=Number(tariffForNotice(row)?.price||0);
   const {data,error}=await db.from('notices').insert(row).select().single();
   if(error){submitButtons.forEach(button=>button.disabled=false);toast(errorText(error),'No se pudo guardar el aviso');return;}
   submitButtons.forEach(button=>button.disabled=false);
-  notices.unshift(data);$('#modal').classList.remove('open');event.target.reset();renderRows();renderComplaints();
+  notices.unshift(data);relatedNoticeMatch=null;$('#modal').classList.remove('open');event.target.reset();renderRows();renderComplaints();renderClientHistory();
   if(type!=='aviso'&&data.status==='Sale')await sendNoticeToConfiguredIntegrations(data);
   else if(type!=='aviso')toast('Se ha guardado sin enviar: cliente equivocado o llamada ajena a la empresa.','Registro guardado');
   else if(data.status==='Sale')await sendNoticeToConfiguredIntegrations(data);
@@ -720,23 +786,24 @@ async function renderNotificationRoutes() {
   host.innerHTML='<div class="empty" style="padding:16px">Cargando destinos…</div>';
   const {data,error}=await db.functions.invoke('manage-integration',{body:{company_id:currentCompany.id,action:'get_routes'}});
   if(error){host.innerHTML=`<div class="empty">No se pudieron cargar los destinos: ${esc(errorText(error))}</div>`;return;}
-  const channels=data?.channels||[],routes=data?.routes||{form:[],phone:[],complaint:[]},blocked=data?.blocked||{form:[],phone:[],complaint:[]};
-  const rows=[['form','Avisos recibidos por formulario web'],['phone','Avisos telefónicos marcados «Aviso Sacado»'],['complaint','Reclamaciones o anulaciones']];
-  host.innerHTML=`<table class="route-table"><thead><tr><th>TIPO DE AVISO</th><th>TELEGRAM</th><th>WHATSAPP</th><th>CORREO</th></tr></thead><tbody>${rows.map(([type,label])=>`<tr><td>${label}</td>${[['telegram','Telegram'],['whatsapp','WhatsApp'],['email','Correo']].map(([channel])=>{const unavailable=blocked[type]?.includes(channel);return `<td><input type="checkbox" aria-label="Enviar ${label} por ${channel}" data-route-type="${type}" data-route-channel="${channel}" ${routes[type]?.includes(channel)?'checked':''} ${channels.includes(channel)&&!unavailable?'':'disabled'} ${unavailable?'title="Configura un grupo de Telegram distinto para este destino"':''} /></td>`;}).join('')}</tr>`).join('')}</tbody></table>`;
-  const hint=$('#routeSaveHint');if(hint)hint.textContent=blocked.complaint?.includes('telegram')?'Para activar Telegram aquí, vuelve a configurarlo con el ID del grupo distinto para reclamaciones o anulaciones.':channels.length?'Marca los destinos que quieras usar y guarda.':'Configura al menos un canal para poder elegirlo aquí.';
-  const save=$('#saveNotificationRoutes');if(save){save.disabled=!channels.length;save.onclick=async()=>{const selected={form:[],phone:[],complaint:[]};$$('[data-route-type]',host).forEach(input=>{if(input.checked)selected[input.dataset.routeType].push(input.dataset.routeChannel);});save.disabled=true;const result=await db.functions.invoke('manage-integration',{body:{company_id:currentCompany.id,action:'save_routes',routes:selected}});save.disabled=false;if(result.error){toast(errorText(result.error),'No se pudieron guardar los destinos');return;}toast('Se han guardado los canales seleccionados.','Destinos guardados');}};
+  const channels=data?.channels||[],routes=data?.routes||{form:[],phone:[],complaint:[]},blocked=data?.blocked||{form:[],phone:[],complaint:[]},destinations=data?.destinations||{};
+  const rows=[['form','Avisos recibidos por formulario web'],['phone','Avisos recibidos por teléfono («Aviso Sacado»)'],['complaint','Reclamaciones o anulaciones']];
+  const channelMeta=[['telegram','Telegram','Grupo o chat'],['whatsapp','WhatsApp','Número con prefijo'],['email','Correo','Destinatarios separados por comas']];
+  host.innerHTML=`<div class="route-table-scroll"><table class="route-table"><thead><tr><th>TIPO DE AVISO</th>${channelMeta.map(([,label])=>`<th>${label}</th>`).join('')}</tr></thead><tbody>${rows.map(([type,label])=>`<tr><td>${label}</td>${channelMeta.map(([channel,label,placeholder])=>{const unavailable=blocked[type]?.includes(channel);const target=destinations[type]?.[channel]||'';return `<td class="route-destination-cell"><label class="route-check"><input type="checkbox" aria-label="Enviar por ${channel}" data-route-type="${type}" data-route-channel="${channel}" ${routes[type]?.includes(channel)?'checked':''} ${channels.includes(channel)?'':'disabled'} ${unavailable?'title="Indica un destino para activar este canal"':''} /> Usar</label><input class="route-destination-input" type="text" placeholder="${placeholder}" aria-label="Destino ${label} para ${type}" data-route-destination-type="${type}" data-route-destination-channel="${channel}" value="${esc(Array.isArray(target)?target.join(', '):target)}" ${channels.includes(channel)?'':'disabled'} /></td>`;}).join('')}</tr>`).join('')}</tbody></table></div>`;
+  const hint=$('#routeSaveHint');if(hint)hint.textContent=channels.length?'Activa cada canal e indica aquí su destino específico para este tipo de aviso.':'Configura primero los canales y luego añade aquí los destinatarios de cada tipo.';
+  const save=$('#saveNotificationRoutes');if(save){save.disabled=!channels.length;save.onclick=async()=>{const selected={form:[],phone:[],complaint:[]},targets={form:{},phone:{},complaint:{}};$$('[data-route-type]',host).forEach(input=>{if(input.checked)selected[input.dataset.routeType].push(input.dataset.routeChannel);});$$('[data-route-destination-type]',host).forEach(input=>{targets[input.dataset.routeDestinationType][input.dataset.routeDestinationChannel]=input.value;});save.disabled=true;const result=await db.functions.invoke('manage-integration',{body:{company_id:currentCompany.id,action:'save_routes',routes:selected,destinations:targets}});save.disabled=false;if(result.error){toast(errorText(result.error),'No se pudieron guardar los destinos');return;}toast('Se han guardado los canales y sus destinatarios.','Destinos guardados');await renderNotificationRoutes();}};
 }
 async function configureIntegration(kind) {
   let config={};
   if(kind==='telegram') {
-    const answer=await formDialog({title:'Configurar Telegram',description:'Usa el mismo bot, pero indica el grupo de avisos y otro grupo separado para reclamaciones o anulaciones.',fields:[{key:'bot_token',label:'Token del bot',type:'password',required:true},{key:'chat_id',label:'ID del grupo para avisos',required:true},{key:'complaint_chat_id',label:'ID del grupo para reclamaciones o anulaciones',required:true}]});
+    const answer=await formDialog({title:'Configurar Telegram',description:'Conecta el bot. Los grupos de formulario, avisos telefónicos y reclamaciones se indican por separado en la tabla de destinos.',fields:[{key:'bot_token',label:'Token del bot',type:'password',required:true}]});
     if(!answer)return;config=answer;
   } else if(kind==='whatsapp') {
-    const answer=await formDialog({title:'Configurar WhatsApp Business',description:'Necesitas tu token y el ID del número de WhatsApp de Meta, un número de destino con prefijo de país y una plantilla de mensaje aprobada. Sin programación: el CRM rellena automáticamente 5 variables.',fields:[{key:'access_token',label:'Token de acceso de Meta',type:'password',required:true},{key:'phone_number_id',label:'ID del número de WhatsApp',required:true},{key:'to',label:'Número que recibirá los avisos (con prefijo de país)',placeholder:'34600111222',required:true},{key:'template_name',label:'Nombre de la plantilla aprobada',placeholder:'aviso_nuevo',required:true},{key:'language',label:'Idioma de la plantilla',placeholder:'es',value:'es',required:true}]});
-    if(!answer)return;config={...answer,to:answer.to.replace(/\D/g,'')};
+    const answer=await formDialog({title:'Configurar WhatsApp Business',description:'Conecta WhatsApp Business con el token y el ID del número de Meta. El número destinatario se configura por separado para formularios, avisos telefónicos y reclamaciones.',fields:[{key:'access_token',label:'Token de acceso de Meta',type:'password',required:true},{key:'phone_number_id',label:'ID del número de WhatsApp',required:true},{key:'template_name',label:'Nombre de la plantilla aprobada',placeholder:'aviso_nuevo',required:true},{key:'language',label:'Idioma de la plantilla',placeholder:'es',value:'es',required:true}]});
+    if(!answer)return;config=answer;
   } else {
-    const answer=await formDialog({title:'Configurar correo',description:'Datos del servicio de envío Resend.',fields:[{key:'api_key',label:'API key de Resend',type:'password',required:true},{key:'from',label:'Remitente verificado',placeholder:'CRM <avisos@dominio.com>',required:true},{key:'to',label:'Correos destinatarios (separados por comas)',type:'textarea',required:true}]});
-    if(!answer)return;config={...answer,to:answer.to.split(',').map(x=>x.trim()).filter(Boolean)};
+    const answer=await formDialog({title:'Configurar correo',description:'Datos del servicio de envío Resend. Los destinatarios se configuran por separado para formularios, avisos telefónicos y reclamaciones.',fields:[{key:'api_key',label:'API key de Resend',type:'password',required:true},{key:'from',label:'Remitente verificado',placeholder:'CRM <avisos@dominio.com>',required:true}]});
+    if(!answer)return;config=answer;
   }
   const {error}=await db.functions.invoke('manage-integration',{body:{company_id:currentCompany.id,kind,config,enabled:true}});
   toast(error?errorText(error):'Integración guardada de forma privada.',error?'No se pudo guardar':'Conexión guardada');
@@ -755,11 +822,11 @@ function showLandingCode(landing) {
 }
 
 function showPage(name) {
-  if(!isSuperAdmin&&!['avisos-landing','avisos-phone','informes','reclamaciones'].includes(name))return;
+  if(!isSuperAdmin&&!['avisos-landing','avisos-phone','informes','reclamaciones','historial'].includes(name))return;
   const pageName=(name==='avisos-landing'||name==='avisos-phone')?'avisos':name;
   $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+pageName));
   $$('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
-  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',reclamaciones:'Reclamaciones o anulaciones',empresas:'Empresas',usuarios:'Usuarios y permisos',personalizacion:'Personalización',configuracion:'Configuración',integraciones:'Integraciones'};
+  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',reclamaciones:'Reclamaciones o anulaciones',historial:'Historial de clientes',empresas:'Empresas',usuarios:'Usuarios y permisos',personalizacion:'Personalización',configuracion:'Configuración',integraciones:'Integraciones'};
   $('#breadcrumb').textContent='Panel / '+labels[name];
   if(pageName==='avisos'){
     noticeSource=name==='avisos-phone'?'phone':'landing';
@@ -772,12 +839,14 @@ function showPage(name) {
     renderRows();
   }
   if(pageName==='reclamaciones')renderComplaints();
+  if(pageName==='historial')renderClientHistory();
   $('#sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'});
 }
 function wireUI() {
   $('#sidebar').addEventListener('click',event=>{const button=event.target.closest('button[data-page]');if(button){event.preventDefault();showPage(button.dataset.page);}});
   setupDate('main');setupDate('report');
   ['tableSearch','globalSearch'].forEach(id=>$('#'+id).addEventListener('input',renderRows));
+  $('#historySearch').addEventListener('input',renderClientHistory);
   ['statusFilter','landingFilter','weekdayFilter'].forEach(id=>$('#'+id).addEventListener('change',renderRows));
   ['reportWeekday','reportLanding','reportStatus'].forEach(id=>$('#'+id).addEventListener('change',renderReport));
   $$('[data-notice-view]').forEach(button=>button.addEventListener('click',()=>setNoticeView(button.dataset.noticeView)));

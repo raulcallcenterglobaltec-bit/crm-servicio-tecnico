@@ -64,6 +64,14 @@ export async function decryptConfig(value: string) {
   return JSON.parse(new TextDecoder().decode(plain))
 }
 
+
+export function integrationDestination(config: Record<string,any>, kind: string, eventType: 'form' | 'phone' | 'complaint') {
+  const key = kind === 'telegram' ? `${eventType}_chat_id` : `${eventType}_to`
+  if (Object.prototype.hasOwnProperty.call(config, key)) return config[key]
+  if (kind === 'telegram') return eventType === 'complaint' ? (config.complaint_chat_id || config.chat_id) : config.chat_id
+  return config.to
+}
+
 function htmlEscape(text: string) {
   return text.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!))
 }
@@ -82,16 +90,18 @@ export async function sendNoticeNotifications(admin: SupabaseClient, companyId: 
       const title = test ? 'Prueba de CRM Gestión de avisos' : isCancellation ? 'Nueva anulación telefónica' : isComplaint ? 'Nueva reclamación telefónica' : 'Nuevo aviso recibido'
       const originLabel = isComplaint ? 'Origen: Teléfono' : eventType === 'form' ? `Landing: ${landingName}` : 'Origen: Teléfono'
       const message = test ? 'La conexión de notificaciones está funcionando.' : `${title}\n${originLabel}\nHora: ${time}\nCliente: ${notice.customer_name || '—'}\nTeléfono: ${notice.phone || '—'}${eventType === 'form' ? `\nAparato: ${notice.device || '—'}\nAvería: ${notice.issue || '—'}` : `\nDetalle: ${notice.issue || '—'}`}`
+      const destination = integrationDestination(config, item.kind, eventType)
+      if (!test && (destination == null || destination === '' || (Array.isArray(destination) && !destination.length))) throw new Error(`Configura el destino de ${eventType === 'form' ? 'formularios' : eventType === 'phone' ? 'avisos telefónicos' : 'reclamaciones o anulaciones'} para ${item.kind}.`)
       if (item.kind === 'telegram') {
-        const telegramChat = isComplaint ? config.complaint_chat_id : config.chat_id
-        if (isComplaint && !telegramChat) throw new Error('Configura el chat de Telegram para reclamaciones o anulaciones.')
+        const telegramChat = test ? (config.form_chat_id || config.chat_id) : destination
         const response = await fetch(`https://api.telegram.org/bot${config.bot_token}/sendMessage`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: telegramChat || config.chat_id, text: message }),
+          body: JSON.stringify({ chat_id: telegramChat, text: message }),
         })
         if (!response.ok) throw new Error(`Telegram respondió ${response.status}`)
       } else if (item.kind === 'email') {
-        const to = Array.isArray(config.to) ? config.to : [config.to]
+        const emailTarget = test ? (config.form_to ?? config.to) : destination
+        const to = Array.isArray(emailTarget) ? emailTarget : [emailTarget]
         const response = await fetch('https://api.resend.com/emails', {
           method: 'POST', headers: { Authorization: `Bearer ${config.api_key}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ from: config.from, to, subject: title, text: message, html: `<pre style="font:14px sans-serif;white-space:pre-wrap">${htmlEscape(message)}</pre>` }),
@@ -103,7 +113,7 @@ export async function sendNoticeNotifications(admin: SupabaseClient, companyId: 
           : [eventType === 'form' ? landingName : (isCancellation ? 'Anulación telefónica' : isComplaint ? 'Reclamación telefónica' : 'Aviso telefónico'), time, notice.customer_name || '—', notice.phone || '—', eventType === 'form' ? (notice.device || '—') : (notice.issue || '—')]
         const response = await fetch(`https://graph.facebook.com/v26.0/${encodeURIComponent(config.phone_number_id)}/messages`, {
           method: 'POST', headers: { Authorization: `Bearer ${config.access_token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: String(config.to).replace(/\D/g, ''), type: 'template', template: { name: config.template_name, language: { code: config.language || 'es' }, components: [{ type: 'body', parameters: params.map(text => ({ type: 'text', text: String(text) })) }] } }),
+          body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: String(test ? (config.form_to ?? config.to) : destination).replace(/\D/g, ''), type: 'template', template: { name: config.template_name, language: { code: config.language || 'es' }, components: [{ type: 'body', parameters: params.map(text => ({ type: 'text', text: String(text) })) }] } }),
         })
         if (!response.ok) {
           const result = await response.json().catch(() => null)

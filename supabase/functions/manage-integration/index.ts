@@ -1,4 +1,4 @@
-import { adminClient, authenticatedUser, companyRole, corsHeaders, decryptConfig, encryptConfig, json, sendNoticeNotifications } from '../_shared/common.ts'
+import { adminClient, authenticatedUser, companyRole, corsHeaders, decryptConfig, encryptConfig, integrationDestination, json, sendNoticeNotifications } from '../_shared/common.ts'
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -6,7 +6,7 @@ Deno.serve(async (req) => {
   const user = await authenticatedUser(req)
   if (!user) return json({ error: 'Debes iniciar sesión.' }, 401)
   try {
-    const { company_id, kind, config, enabled = true, action = 'save', routes } = await req.json()
+    const { company_id, kind, config, enabled = true, action = 'save', routes, destinations } = await req.json()
     if (!company_id) return json({ error: 'Empresa no válida.' }, 400)
     const admin = adminClient()
     const role = await companyRole(admin, company_id, user.id)
@@ -16,33 +16,63 @@ Deno.serve(async (req) => {
       const { data: rows, error: rowsError } = await admin.from('company_integrations').select('kind,enabled,encrypted_config').eq('company_id', company_id)
       if (rowsError) throw rowsError
       const routeTypes = ['form','phone','complaint'] as const
+      const channelTypes = ['telegram','whatsapp','email'] as const
       if (action === 'get_routes') {
-        const channels = (rows || []).filter(x => x.enabled).map(x => x.kind)
+        const enabledRows = (rows || []).filter(x => x.enabled)
+        const channels = enabledRows.map(x => x.kind)
         const saved: Record<string,string[]> = { form: [], phone: [], complaint: [] }
         const blocked: Record<string,string[]> = { form: [], phone: [], complaint: [] }
-        for (const row of (rows || []).filter(x => x.enabled)) {
+        const targets: Record<string,Record<string,unknown>> = Object.fromEntries(routeTypes.map(type => [type, {}]))
+        for (const row of enabledRows) {
           const current = await decryptConfig(row.encrypted_config)
-          const telegramComplaintMissing = row.kind === 'telegram' && !current.complaint_chat_id
-          if (telegramComplaintMissing) blocked.complaint.push('telegram')
           for (const type of routeTypes) {
+            let target = integrationDestination(current, row.kind, type)
+            if (row.kind === 'email') target = Array.isArray(target) ? target.join(', ') : (target || '')
+            targets[type][row.kind] = target || ''
+            const legacyDefault = row.kind === 'telegram' ? !!(type === 'complaint' ? current.complaint_chat_id : current.chat_id) : !!current.to
             const selected = current.routes
               ? Array.isArray(current.routes[type]) && current.routes[type].includes(row.kind)
-              : true
-            if (selected && !(type === 'complaint' && telegramComplaintMissing)) saved[type].push(row.kind)
+              : legacyDefault
+            if (selected && target) saved[type].push(row.kind)
+            else if (selected && !target) blocked[type].push(row.kind)
           }
         }
-        return json({ ok: true, channels, routes: saved, blocked })
+        return json({ ok: true, channels, routes: saved, blocked, destinations: targets })
       }
-      if (!routes || routeTypes.some(type => !Array.isArray(routes[type]) || routes[type].some((value: string) => !['telegram','email','whatsapp'].includes(value)))) return json({ error: 'Selecciona destinos válidos para cada tipo de aviso.' }, 400)
-      if (routes.complaint.includes('telegram')) {
-        const telegramRow = (rows || []).find(x => x.kind === 'telegram' && x.enabled)
-        const telegramConfig = telegramRow ? await decryptConfig(telegramRow.encrypted_config) : null
-        if (!telegramConfig?.complaint_chat_id) return json({ error: 'Vuelve a configurar Telegram e indica el grupo distinto para reclamaciones o anulaciones.' }, 400)
+      if (!routes || routeTypes.some(type => !Array.isArray(routes[type]) || routes[type].some((value: string) => !channelTypes.includes(value as any)))) return json({ error: 'Selecciona destinos válidos para cada tipo de aviso.' }, 400)
+      const enabledRows = (rows || []).filter(x => x.enabled)
+      const updates = new Map<string,Record<string,any>>()
+      for (const row of enabledRows) updates.set(row.kind, await decryptConfig(row.encrypted_config))
+      const normalized: Record<string,Record<string,unknown>> = {}
+      for (const type of routeTypes) {
+        normalized[type] = {}
+        for (const channel of channelTypes) {
+          const raw = destinations?.[type]?.[channel]
+          let target: string | string[] = typeof raw === 'string' ? raw.trim() : ''
+          if (channel === 'email') {
+            target = (typeof raw === 'string' ? raw.split(',') : Array.isArray(raw) ? raw : []).map((value: unknown) => String(value).trim()).filter(Boolean)
+            if ((routes[type] as string[]).includes(channel) && (!target.length || target.some((email: string) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))) return json({ error: `Indica un correo válido para ${type === 'form' ? 'avisos de formulario' : type === 'phone' ? 'avisos telefónicos' : 'reclamaciones o anulaciones'}.` }, 400)
+          } else if (channel === 'whatsapp') {
+            target = String(target).replace(/\D/g, '')
+            if ((routes[type] as string[]).includes(channel) && !/^\d{8,15}$/.test(target as string)) return json({ error: `Indica el número de WhatsApp con prefijo internacional para ${type === 'form' ? 'avisos de formulario' : type === 'phone' ? 'avisos telefónicos' : 'reclamaciones o anulaciones'}.` }, 400)
+          } else if ((routes[type] as string[]).includes(channel) && !target) {
+            return json({ error: `Indica el grupo de Telegram para ${type === 'form' ? 'avisos de formulario' : type === 'phone' ? 'avisos telefónicos' : 'reclamaciones o anulaciones'}.` }, 400)
+          }
+          normalized[type][channel] = target
+          if ((routes[type] as string[]).includes(channel) && !updates.has(channel)) return json({ error: `Configura ${channel} antes de activarlo.` }, 400)
+        }
       }
-      for (const row of (rows || []).filter(x => x.enabled)) {
-        const current = await decryptConfig(row.encrypted_config)
+      for (const row of enabledRows) {
+        const current = updates.get(row.kind)!
         current.routes = Object.fromEntries(routeTypes.map(type => [type, routes[type].includes(row.kind) ? [row.kind] : []]))
-        const encrypted_config = await encryptConfig(current)
+        for (const type of routeTypes) {
+          const value = normalized[type][row.kind]
+          if (row.kind === 'telegram') current[`${type}_chat_id`] = value
+          else current[`${type}_to`] = value
+        }
+      }
+      for (const row of enabledRows) {
+        const encrypted_config = await encryptConfig(updates.get(row.kind)!)
         const { error } = await admin.from('company_integrations').update({ encrypted_config, updated_at: new Date().toISOString() }).eq('company_id', company_id).eq('kind', row.kind)
         if (error) throw error
       }
@@ -50,14 +80,14 @@ Deno.serve(async (req) => {
     }
 
     if (!['telegram','email','whatsapp'].includes(kind)) return json({ error: 'Integración no válida.' }, 400)
-    if (kind === 'telegram' && (!config?.bot_token || !config?.chat_id || !config?.complaint_chat_id)) return json({ error: 'Indica el token, el chat de avisos y el chat distinto para reclamaciones o anulaciones.' }, 400)
-    if (kind === 'email' && (!config?.api_key || !config?.from || !Array.isArray(config?.to) || !config.to.length)) return json({ error: 'Falta la API key, remitente o destinatario.' }, 400)
-    if (kind === 'whatsapp' && (!config?.access_token || !/^\d{5,30}$/.test(String(config?.phone_number_id || '')) || !/^\d{8,15}$/.test(String(config?.to || '')) || !/^[a-z0-9_]{2,512}$/i.test(String(config?.template_name || '')) || !/^[a-zA-Z_]{2,16}$/.test(String(config?.language || '')))) return json({ error: 'Revisa el token, ID del número, número de destino, plantilla e idioma de WhatsApp.' }, 400)
+    if (kind === 'telegram' && !config?.bot_token) return json({ error: 'Indica el token del bot de Telegram.' }, 400)
+    if (kind === 'email' && (!config?.api_key || !config?.from)) return json({ error: 'Falta la API key o el remitente.' }, 400)
+    if (kind === 'whatsapp' && (!config?.access_token || !/^\d{5,30}$/.test(String(config?.phone_number_id || '')) || !/^[a-z0-9_]{2,512}$/i.test(String(config?.template_name || '')) || !/^[a-zA-Z_]{2,16}$/.test(String(config?.language || '')))) return json({ error: 'Revisa el token, ID del número, plantilla e idioma de WhatsApp.' }, 400)
     const { data: existing, error: existingError } = await admin.from('company_integrations').select('encrypted_config').eq('company_id', company_id).eq('kind', kind).maybeSingle()
     if (existingError) throw existingError
     const previous = existing?.encrypted_config ? await decryptConfig(existing.encrypted_config) : null
     const savedRoutes = previous?.routes || (previous ? { form: [kind], phone: [kind], complaint: [kind] } : { form: [], phone: [], complaint: [] })
-    const encrypted_config = await encryptConfig({ ...config, routes: savedRoutes })
+    const encrypted_config = await encryptConfig({ ...(previous || {}), ...config, routes: savedRoutes })
     const { error } = await admin.from('company_integrations').upsert({ company_id, kind, enabled: !!enabled, encrypted_config, updated_at: new Date().toISOString() }, { onConflict: 'company_id,kind' })
     if (error) throw error
     return json({ ok: true })
