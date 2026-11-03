@@ -28,6 +28,9 @@ export async function authenticatedUser(req: Request) {
 }
 
 export async function companyRole(admin: SupabaseClient, companyId: string, userId: string) {
+  const { data: superAdmin, error: superAdminError } = await admin.from('global_admins').select('user_id').eq('user_id', userId).maybeSingle()
+  if (superAdminError) throw superAdminError
+  if (superAdmin) return 'super_admin'
   const { data, error } = await admin.from('company_members').select('role').eq('company_id', companyId).eq('user_id', userId).maybeSingle()
   if (error) throw error
   return data?.role || null

@@ -10,7 +10,7 @@ Deno.serve(async (req) => {
     if (!company_id || !['telegram','email','whatsapp'].includes(kind)) return json({ error: 'Empresa o integración no válida.' }, 400)
     const admin = adminClient()
     const role = await companyRole(admin, company_id, user.id)
-    if (!['owner','admin'].includes(role)) return json({ error: 'Solo un administrador puede cambiar integraciones.' }, 403)
+    if (!['owner','admin','super_admin'].includes(role)) return json({ error: 'Solo el superadministrador puede cambiar integraciones.' }, 403)
     if (kind === 'telegram' && (!config?.bot_token || !config?.chat_id)) return json({ error: 'Falta el token o el ID del chat.' }, 400)
     if (kind === 'email' && (!config?.api_key || !config?.from || !Array.isArray(config?.to) || !config.to.length)) return json({ error: 'Falta la API key, remitente o destinatario.' }, 400)
     if (kind === 'whatsapp' && (!config?.access_token || !/^\d{5,30}$/.test(String(config?.phone_number_id || '')) || !/^\d{8,15}$/.test(String(config?.to || '')) || !/^[a-z0-9_]{2,512}$/i.test(String(config?.template_name || '')) || !/^[a-zA-Z_]{2,16}$/.test(String(config?.language || '')))) return json({ error: 'Revisa el token, ID del número, número de destino, plantilla e idioma de WhatsApp.' }, 400)

@@ -10,7 +10,7 @@ Deno.serve(async (req) => {
     if (!company_id || !['telegram','email','whatsapp'].includes(kind)) return json({ error: 'Empresa o integración no válida.' }, 400)
     const admin = adminClient()
     const role = await companyRole(admin, company_id, user.id)
-    if (!['owner','admin'].includes(role)) return json({ error: 'Solo un administrador puede probar integraciones.' }, 403)
+    if (!['owner','admin','super_admin'].includes(role)) return json({ error: 'Solo el superadministrador puede probar integraciones.' }, 403)
     const results = await sendNoticeNotifications(admin, company_id, {}, 'CRM Servicio Técnico', true, kind)
     const result = results.find(x => x.kind === kind)
     if (!result) return json({ error: 'Configura esta integración antes de enviar la prueba.' }, 400)

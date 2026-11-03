@@ -6,7 +6,7 @@ const $$ = (s, root=document) => [...root.querySelectorAll(s)];
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = value => Number(value || 0).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
 const categoryFor = device => /aire acondicionado|aerotermia|bomba de calor|acs|caldera|calentador|termo/i.test(String(device||'')) ? 'Clima' : (device ? 'Gama blanca' : null);
-let user=null, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, noticeSource='landing', fieldScope='phone', noticeView='table';
+let user=null, isSuperAdmin=false, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, noticeSource='landing', fieldScope='phone', noticeView='table';
 let fieldEditorRows=[];
 let authMode='login', selectedDate=new Date().toISOString().slice(0,10);
 const defaultFields=[
@@ -78,11 +78,11 @@ function openAuth() {
 function setAuthMode(mode) {
   authMode=mode;
   $('#authError').textContent='';
-  $('#authIntro').textContent=mode==='login'?'Accede a los avisos y la configuración de tu empresa.':'Crea tu acceso y registra la primera empresa.';
+  $('#authIntro').textContent=mode==='login'?'Accede a los avisos de tu empresa.':'Crea tu acceso; el superadministrador te asignará a una empresa.';
   $('#authSubmit').textContent=mode==='login'?'Entrar':'Crear cuenta';
   $('#authSwitch').textContent=mode==='login'?'Crear cuenta':'Ya tengo cuenta';
   $('#forgotPassword').hidden=mode!=='login';
-  $('#firstCompanyField').hidden=mode!=='signup';
+  $('#firstCompanyField').hidden=true;
   $('#authPassword').autocomplete=mode==='login'?'current-password':'new-password';
 }
 async function handleAuth(event) {
@@ -94,13 +94,11 @@ async function handleAuth(event) {
       const {error}=await db.auth.signInWithPassword({email,password}); if(error)throw error;
       message.textContent='Acceso correcto.';
     } else {
-      const companyName=$('#firstCompany').value.trim(); if(companyName.length<2)throw new Error('Escribe el nombre de la primera empresa.');
-      localStorage.setItem('crm-service-first-company',companyName);
+      localStorage.removeItem('crm-service-first-company');
       const {data,error}=await db.auth.signUp({email,password});
       if(error)throw error;
       if(data.session) {
-        await makeFirstCompany(companyName);
-        message.textContent='Cuenta creada.';
+        message.textContent='Cuenta creada. El superadministrador debe asignarte a una empresa para acceder.';
       } else {
         message.textContent='Te enviamos un correo para confirmar la cuenta. Después vuelve aquí e inicia sesión.';
       }
@@ -114,26 +112,23 @@ async function resetPassword() {
   const {error}=await db.auth.resetPasswordForEmail(email);
   $('#authError').textContent=error?errorText(error):'Si el correo existe, recibirás instrucciones para restablecer la contraseña.';
 }
-async function makeFirstCompany(name) {
-  const {error}=await db.rpc('create_company_for_self',{company_name:name}); if(error)throw error;
-  localStorage.removeItem('crm-service-first-company');
-}
 function mountSignOut() {
   const userMeta=$('.user-meta'); if(!userMeta)return;
   userMeta.querySelector('strong').textContent=user?.email||'Usuario';
-  userMeta.querySelector('span').textContent=members.find(m=>m.user_id===user?.id)?.role||'Usuario';
+  userMeta.querySelector('span').textContent=isSuperAdmin?'Superadministrador':(members.find(m=>m.user_id===user?.id)?.role==='consulta'?'Consulta':'Gestor');
   if(!$('#signOut')) { const b=document.createElement('button');b.id='signOut';b.className='signout-btn';b.textContent='Salir';$('.top-actions').append(b);b.addEventListener('click',async()=>{await db.auth.signOut();location.reload();}); }
 }
 async function loadMemberships() {
+  const {data:globalRole,error:globalRoleError}=await db.rpc('is_super_admin');
+  if(globalRoleError)throw globalRoleError;
+  isSuperAdmin=globalRole===true;applyAccessPermissions();
   const {data,error}=await db.from('company_members').select('company_id,user_id,email,role').eq('user_id',user.id);
   if(error)throw error; members=data||[];
+  applyAccessPermissions();
   const ids=[...new Set(members.map(m=>m.company_id))];
-  if(!ids.length) {
-    const pending=localStorage.getItem('crm-service-first-company');
-    if(pending){await makeFirstCompany(pending);return loadMemberships();}
-    showOnboarding(); return;
-  }
-  const {data:rows,error:companyError}=await db.from('companies').select('*').in('id',ids).order('created_at');
+  if(!isSuperAdmin&&!ids.length){showOnboarding();return;}
+  const companyQuery=db.from('companies').select('*').order('created_at');
+  const {data:rows,error:companyError}=isSuperAdmin?await companyQuery:await companyQuery.in('id',ids);
   if(companyError)throw companyError;
   companies=rows||[];
   if(!companies.length){showOnboarding();return;}
@@ -142,11 +137,18 @@ async function loadMemberships() {
   mountSignOut(); renderCompanyPicker(); renderCompanyPage(); renderMembers(); renderIntegrations(); renderSettings(); await loadCompanyData();
 }
 function showOnboarding() {
-  $('#authIntro').textContent='Tu usuario todavía no está asociado a una empresa. Crea la primera para empezar.';
-  const oldForm=$('#authForm'), form=oldForm.cloneNode(false);oldForm.replaceWith(form);
-  form.innerHTML=`<label>Nombre de la empresa<input id="onboardingCompany" maxlength="120" required placeholder="Ej. Global Técnicos"/></label><button class="primary-btn" id="createFirstCompany" type="submit">Crear empresa</button>`;
-  form.addEventListener('submit',async e=>{e.preventDefault();try{await makeFirstCompany($('#onboardingCompany').value.trim());await loadMemberships();}catch(err){$('#authError').textContent=errorText(err);}});
-  $('#authSwitch').hidden=true;$('#forgotPassword').hidden=true;$('#firstCompanyField').hidden=true;$('#authError').textContent='';
+  localStorage.removeItem('crm-service-first-company');
+  $('#authIntro').textContent='Tu cuenta todavía no está asociada a una empresa.';
+  $('#authForm').hidden=true;$('#authSwitch').hidden=true;$('#forgotPassword').hidden=true;$('#firstCompanyField').hidden=true;
+  $('#authError').textContent='Pide al superadministrador que te invite a la empresa correspondiente.';
+}
+function applyAccessPermissions() {
+  const adminNav=$$('[data-admin-only]');adminNav.forEach(el=>el.hidden=!isSuperAdmin);
+  const picker=$('.company-select');if(picker)picker.hidden=!isSuperAdmin;
+  const separator=$('.top-sep');if(separator)separator.hidden=!isSuperAdmin;
+  const current=members.find(m=>m.user_id===user?.id);
+  $$('[data-page]').forEach(button=>{if(['empresas','usuarios','configuracion','integraciones'].includes(button.dataset.page))button.hidden=!isSuperAdmin;});
+  const createButton=$('#newNotice');if(createButton)createButton.hidden=!isSuperAdmin&&current?.role==='consulta';
 }
 function mixColor(hex,target,weight) {
   const from=hex.match(/[\da-f]{2}/ig)||['52','67','e8'],to=target.match(/[\da-f]{2}/ig)||['ff','ff','ff'];
@@ -164,6 +166,7 @@ function applyCompanyTheme(color) {
 }
 function renderCompanyPicker() {
   const old=$('.company-select');if(!old)return;
+  if(!isSuperAdmin){old.hidden=true;const separator=$('.top-sep');if(separator)separator.hidden=true;return;}
   const select=document.createElement('label');select.className='company-select';
   select.innerHTML=`<span class="company-badge">${esc((currentCompany.name||'GT').slice(0,2).toUpperCase())}</span><select id="companySwitch" aria-label="Empresa"></select>`;
   old.replaceWith(select);
@@ -191,9 +194,10 @@ async function loadCompanyData() {
     ]);
     for(const r of results)if(r.error)throw r.error;
     [landings,notices,tariffs,fields,members]=results.map(r=>r.data||[]);
+    applyAccessPermissions();
     if(!fields.length){const seeds=['phone','landing'].flatMap(channel=>defaultFields.map(f=>({...f,channel,options:f.options||[],company_id:c})));const {data:createdFields,error}=await db.from('notice_fields').insert(seeds).select();if(error)throw error;fields=createdFields||[];}
-    if(!realtimeChannel){realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();toast(`${payload.new.created_by?'Teléfono':'Landing: '+landingName(payload.new.landing_id)} · ${payload.new.device||'Aviso'} · ${formatDate(payload.new.received_at)}`,'Nuevo aviso recibido');}}).subscribe();}
-    else {await db.removeChannel(realtimeChannel);realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();toast(`${payload.new.created_by?'Teléfono':'Landing: '+landingName(payload.new.landing_id)} · ${payload.new.device||'Aviso'} · ${formatDate(payload.new.received_at)}`,'Nuevo aviso recibido');}}).subscribe();}
+    if(!realtimeChannel){realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();}}).subscribe();}
+    else {await db.removeChannel(realtimeChannel);realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();}}).subscribe();}
     $$('.demo-banner').forEach(el=>el.remove());setConnectionError('');
     renderLandingOptions();renderRows();renderReport();renderFields();renderPriceRules();renderCompanyPage();renderMembers();renderIntegrations();renderSettings();
     mountSignOut();
@@ -255,8 +259,18 @@ function noticeFieldsForCards() {
 function selectedCardFields() {
   return noticeFieldsForCards().filter(f=>f.visible_on_card!==false&&f.field_key!=='customer_name').map(f=>f.field_key);
 }
+function canManageCurrentNotices() {
+  return isSuperAdmin||members.some(m=>m.user_id===user?.id&&m.role==='gestor');
+}
+function updateLandingBadge() {
+  const count=notices.filter(n=>n.landing_id&&n.status==='Nuevo').length;
+  const badge=$('#landingPendingBadge');if(badge){badge.textContent=count>99?'99+':String(count);badge.hidden=count===0;}
+  const button=$('#pendingLandingButton');if(button){button.hidden=noticeSource!=='landing'||count===0;button.textContent=`⚑ Avisos pendientes (${count})`;}
+}
 function renderCardFieldPanel() {
   const panel=$('#cardFieldPanel');if(!panel)return;
+  const toggle=$('#cardFieldsToggle');if(toggle)toggle.hidden=!isSuperAdmin;
+  if(!isSuperAdmin){panel.hidden=true;return;}
   const chosen=selectedCardFields();
   panel.innerHTML='<span style="grid-column:1/-1;font-size:10px;color:#8993a4">Nombre, origen y fecha se muestran siempre.</span>'+noticeFieldsForCards().filter(f=>f.field_key!=='customer_name').map(f=>`<label><input type="checkbox" data-card-field="${esc(f.id)}" ${chosen.includes(f.field_key)?'checked':''}/> ${esc(f.label)}</label>`).join('');
   $$('[data-card-field]',panel).forEach(input=>input.addEventListener('change',async event=>{
@@ -285,7 +299,7 @@ function renderKanban(rows) {
         return value!==''&&value!==null&&value!==undefined?`<span><b>${esc(f.label)}:</b> ${esc(value)}</span>`:'';
       }).filter(Boolean).join('');
       const origin=n.created_by?'Teléfono':landingName(n.landing_id);
-      return `<article class="notice-card" draggable="true" data-card-id="${esc(n.id)}"><div class="notice-card-head"><div><strong>${esc(customer)}</strong></div><button type="button" class="row-action" data-open-card="${esc(n.id)}" aria-label="Ver aviso">···</button></div><div class="notice-card-fields">${details}<span><b>Origen:</b> ${esc(origin)}</span><span><b>Recibido:</b> ${esc(formatDate(n.received_at))}</span></div><div class="notice-card-foot"><select data-card-status="${esc(n.id)}" aria-label="Cambiar estado del aviso">${['Nuevo','Sale','No sale'].map(s=>`<option value="${s}" ${s===status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select>${status==='Sale'&&!n.created_by?`<small>${money(getUnitPrice(n))}</small>`:''}</div></article>`;
+      return `<article class="notice-card" draggable="${canManageCurrentNotices()}" data-card-id="${esc(n.id)}"><div class="notice-card-head"><div><strong>${esc(customer)}</strong></div><button type="button" class="row-action" data-open-card="${esc(n.id)}" aria-label="Ver aviso">···</button></div><div class="notice-card-fields">${details}<span><b>Origen:</b> ${esc(origin)}</span><span><b>Recibido:</b> ${esc(formatDate(n.received_at))}</span></div><div class="notice-card-foot"><select data-card-status="${esc(n.id)}" aria-label="Cambiar estado del aviso" ${canManageCurrentNotices()?'':'disabled'}>${['Nuevo','Sale','No sale'].map(s=>`<option value="${s}" ${s===status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select>${status==='Sale'&&!n.created_by?`<small>${money(getUnitPrice(n))}</small>`:''}</div></article>`;
     }).join('');
     return `<section class="kanban-column" data-drop-status="${status}"><div class="kanban-column-head"><span>${labels[status]}</span><span class="kanban-count">${rows.filter(n=>(n.status||'Nuevo')===status).length}</span></div><div class="kanban-list">${cards||'<div class="empty" style="padding:22px 8px;font-size:10px">Arrastra un aviso aquí</div>'}</div></section>`;
   }).join('');
@@ -305,6 +319,7 @@ function renderRows() {
   const body=$('#noticeRows');if(!body)return;
   const rows=filteredNotices(false);
   const landingFilter=$('#landingFilter')?.value||'all';
+  const canManage=canManageCurrentNotices();
   const shownFields=(noticeSource==='phone'?fieldsForPhone():(landingFilter==='all'?fields.filter(f=>f.channel==='landing'):fieldsForLanding(landingFilter))).filter(f=>f.visible_in_table);
   const sourceHeading=noticeSource==='phone'?'ORIGEN':'LANDING DE ORIGEN';
   const systemHead=`<th>${sourceHeading}</th><th>RECIBIDO</th><th>ESTADO</th><th>VALOR</th><th></th>`;
@@ -318,7 +333,7 @@ function renderRows() {
       return `<td>${esc(v||'—')}</td>`;
     }).join('');
     const sourceLabel=n.created_by?'Teléfono':landingName(n.landing_id);
-    return `<tr>${cells}<td><span class="source">${esc(sourceLabel)}</span></td><td>${esc(formatDate(n.received_at))}</td><td><select class="status ${statusClass(n.status)}" data-status-id="${n.id}" aria-label="Cambiar estado">${['Nuevo','Sale','No sale'].map(s=>`<option value="${esc(s)}" ${s===n.status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select></td><td>${n.status==='Sale'&&!n.created_by?money(getUnitPrice(n)):'—'}</td><td><button class="row-action" data-open-id="${n.id}" aria-label="Abrir aviso">···</button></td></tr>`;
+    return `<tr>${cells}<td><span class="source">${esc(sourceLabel)}</span></td><td>${esc(formatDate(n.received_at))}</td><td><select class="status ${statusClass(n.status)}" data-status-id="${n.id}" aria-label="Cambiar estado" ${canManage?'':'disabled'}>${['Nuevo','Sale','No sale'].map(s=>`<option value="${esc(s)}" ${s===n.status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select></td><td>${n.status==='Sale'&&!n.created_by?money(getUnitPrice(n)):'—'}</td><td><button class="row-action" data-open-id="${n.id}" aria-label="Abrir aviso">···</button></td></tr>`;
   }).join('');
   $('#emptyState').hidden=rows.length>0;
   $('#rowCount').textContent=`Mostrando ${rows.length} de ${notices.length} avisos`;
@@ -332,11 +347,13 @@ function renderRows() {
   const days=[1,2,3,4,5,6,0].map(day=>{const g=rows.filter(n=>new Date(dateOnly(n.received_at)+'T12:00:00').getDay()===day);return[g.length,g.filter(n=>n.status==='Sale').length,g.filter(n=>n.status==='No sale').length];});
   const max=Math.max(1,...days.flat());
   $$('.bar-group').forEach((g,i)=>$$('.bar',g).forEach((b,j)=>b.style.height=`${days[i]?.[j]/max*100||0}%`));
+  updateLandingBadge();
   $$('[data-status-id]',body).forEach(sel=>sel.addEventListener('change',async e=>changeStatus(e.target.dataset.statusId,e.target.value)));
   $$('[data-open-id]',body).forEach(b=>b.addEventListener('click',()=>showDetails(b.dataset.openId)));
   renderReport();
 }
 async function changeStatus(id,status) {
+  if(!canManageCurrentNotices())return;
   const n=notices.find(x=>x.id===id);if(!n)return;
   const wasSale=n.status==='Sale';
   const tariff=tariffs.find(t=>t.landing_id===n.landing_id&&t.category===n.category);
@@ -466,6 +483,7 @@ function showSettingsTab(name) {
   if(name==='landing-fields'){fieldScope='landing';renderFields();}
 }
 async function renderSettings() {
+  if(!isSuperAdmin)return;
   if(!currentCompany)return;
   const article=$('#brandPanel');
   if(article) {
@@ -512,18 +530,22 @@ async function addCompany() {
   finally { if(button)button.disabled=false; }
 }
 function renderCompanyPage() {
+  if(!isSuperAdmin)return;
   const section=$('#page-empresas');if(!section)return;
   let grid=$('.simple-grid',section);if(!grid)return;
   grid.innerHTML=companies.map(c=>`<button class="placeholder-tile" data-company-card="${c.id}" style="text-align:left;cursor:pointer"><div class="company-badge">${esc(c.name.slice(0,2).toUpperCase())}</div><strong>${esc(c.name)}</strong><small>${c.id===currentCompany.id?'Empresa actual':'Cambiar a esta empresa'}</small></button>`).join('')||'<div class="empty">Crea tu primera empresa.</div>';
   $$('[data-company-card]',grid).forEach(b=>b.onclick=()=>{currentCompany=companies.find(c=>c.id===b.dataset.companyCard);renderCompanyPicker();loadCompanyData();});
 }
 function renderMembers() {
+  if(!isSuperAdmin)return;
   const section=$('#page-usuarios');if(!section)return;
-  const grid=$('.simple-grid',section);if(grid)grid.innerHTML=members.map(m=>`<div class="placeholder-tile"><strong>${esc(m.email||m.user_id.slice(0,8))}</strong><small>${esc(m.role)}</small>${m.role==='owner'?'':`<button class="mini-delete" data-remove-member="${m.user_id}" aria-label="Quitar usuario">×</button>`}</div>`).join('')||'<div class="empty">No hay usuarios.</div>';
+  const grid=$('.simple-grid',section);if(grid)grid.innerHTML=members.filter(m=>m.user_id!==user?.id).map(m=>`<div class="placeholder-tile"><strong>${esc(m.email||m.user_id.slice(0,8))}</strong><small>Permisos para esta empresa</small><div class="button-row" style="margin-top:10px"><select data-member-role="${m.user_id}" aria-label="Permisos de ${esc(m.email||'usuario')}"><option value="gestor" ${m.role==='gestor'?'selected':''}>Gestor: avisos e informes</option><option value="consulta" ${m.role==='consulta'?'selected':''}>Consulta: solo lectura</option></select><button class="mini-delete" data-remove-member="${m.user_id}" aria-label="Quitar usuario">×</button></div></div>`).join('')||'<div class="empty">Todavía no hay usuarios normales en esta empresa.</div>';
+  $$('[data-member-role]',section).forEach(select=>select.onchange=async()=>{const role=select.value,member=members.find(m=>m.user_id===select.dataset.memberRole);if(!member)return;select.disabled=true;const {error}=await db.from('company_members').update({role}).eq('company_id',currentCompany.id).eq('user_id',member.user_id);select.disabled=false;if(error){toast(errorText(error),'No se pudieron cambiar los permisos');renderMembers();return;}member.role=role;toast(`Permiso actualizado: ${role==='consulta'?'consulta':'gestor'}.`,'Permisos guardados');renderMembers();});
   $$('[data-remove-member]',section).forEach(b=>b.onclick=async()=>{if(!await confirmDialog('¿Retirar este usuario de la empresa?'))return;const {error}=await db.from('company_members').delete().eq('company_id',currentCompany.id).eq('user_id',b.dataset.removeMember);if(error)toast(errorText(error),'No se pudo retirar');else{members=members.filter(m=>m.user_id!==b.dataset.removeMember);renderMembers();}});
-  const add=$('.page-head .primary-btn',section);if(add)add.onclick=async()=>{const answer=await formDialog({title:'Invitar usuario',description:'Elige el correo y los permisos para esta empresa.',fields:[{key:'email',label:'Correo electrónico',type:'email',required:true,autocomplete:'email'},{key:'role',label:'Permiso',type:'select',value:'gestor',options:['admin','gestor','consulta']}]});if(!answer)return;const {error}=await db.functions.invoke('invite-member',{body:{company_id:currentCompany.id,email:answer.email.trim(),role:answer.role}});toast(error?errorText(error):'Invitación enviada. El usuario recibirá un correo para acceder.',error?'No se pudo invitar':'Invitación enviada');};
+  const add=$('.page-head .primary-btn',section);if(add)add.onclick=async()=>{const answer=await formDialog({title:'Invitar usuario',description:'La persona solo tendrá acceso a esta empresa. Elige si podrá gestionar avisos o consultar la información.',fields:[{key:'email',label:'Correo electrónico',type:'email',required:true,autocomplete:'email'},{key:'role',label:'Permiso',type:'select',value:'gestor',options:[{value:'gestor',label:'Gestor: puede registrar y gestionar avisos'},{value:'consulta',label:'Consulta: solo lectura'}]}]});if(!answer)return;const {error}=await db.functions.invoke('invite-member',{body:{company_id:currentCompany.id,email:answer.email.trim(),role:answer.role}});toast(error?errorText(error):'Invitación enviada. El usuario recibirá un correo para acceder.',error?'No se pudo invitar':'Invitación enviada');if(!error)await loadCompanyData();};
 }
 async function renderIntegrations() {
+  if(!isSuperAdmin)return;
   const section=$('#page-integraciones');if(!section)return;
   const old=$('.demo-banner',section);if(old)old.remove();
   const grid=$('.simple-grid',section);if(!grid)return;
@@ -566,10 +588,11 @@ function showLandingCode(landing) {
 }
 
 function showPage(name) {
+  if(!isSuperAdmin&&!['avisos-landing','avisos-phone','informes','reclamaciones'].includes(name))return;
   const pageName=(name==='avisos-landing'||name==='avisos-phone')?'avisos':name;
   $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+pageName));
   $$('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
-  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',empresas:'Empresas',usuarios:'Usuarios y permisos',configuracion:'Configuración',integraciones:'Integraciones'};
+  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',reclamaciones:'Reclamaciones',empresas:'Empresas',usuarios:'Usuarios y permisos',configuracion:'Configuración',integraciones:'Integraciones'};
   $('#breadcrumb').textContent='Panel / '+labels[name];
   if(pageName==='avisos'){
     noticeSource=name==='avisos-phone'?'phone':'landing';
@@ -597,7 +620,7 @@ function wireUI() {
   $('#modal').addEventListener('click',e=>{if(e.target.id==='modal')e.currentTarget.classList.remove('open');});
   $('#noticeForm').addEventListener('submit',createNotice);
   $('#menuToggle').addEventListener('click',()=>$('#sidebar').classList.toggle('open'));
-  $('#showToast').addEventListener('click',()=>toast('Los avisos nuevos aparecerán aquí al entrar desde una landing.','Notificaciones'));
+  $('#pendingLandingButton').addEventListener('click',()=>{$('#statusFilter').value='Nuevo';renderRows();});
   $('#exportBtn').addEventListener('click',()=>exportCsv(false));$('#reportExport').addEventListener('click',()=>exportCsv(true));
   $('#addField').addEventListener('click',addField);
   $$('[data-settings-tab]').forEach(button=>button.addEventListener('click',()=>showSettingsTab(button.dataset.settingsTab)));

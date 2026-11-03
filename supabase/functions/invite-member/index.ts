@@ -10,9 +10,9 @@ Deno.serve(async (req) => {
   try {
     const { company_id, email: rawEmail, role } = await req.json()
     const email = String(rawEmail || '').trim().toLowerCase()
-    if (!company_id || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !['admin','gestor','consulta'].includes(role)) return json({ error: 'Correo o rol no válido.' }, 400)
+    if (!company_id || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !['gestor','consulta'].includes(role)) return json({ error: 'Correo o rol no válido.' }, 400)
     const admin = adminClient()
-    if (!['owner','admin'].includes(await companyRole(admin, company_id, user.id))) return json({ error: 'Solo un administrador puede invitar usuarios.' }, 403)
+    if (await companyRole(admin, company_id, user.id) !== 'super_admin') return json({ error: 'Solo el superadministrador puede invitar usuarios.' }, 403)
     const { data: users, error: listError } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 })
     if (listError) throw listError
     let target = users.users.find(x => x.email?.toLowerCase() === email)
@@ -22,6 +22,12 @@ Deno.serve(async (req) => {
       target = data.user
     }
     if (!target) throw new Error('No se pudo preparar la invitación.')
+    const { data: isGlobalAdmin, error: globalAdminError } = await admin.from('global_admins').select('user_id').eq('user_id', target.id).maybeSingle()
+    if (globalAdminError) throw globalAdminError
+    if (isGlobalAdmin) return json({ error: 'La cuenta superadministradora no se puede gestionar como usuario normal.' }, 409)
+    const { data: existing, error: memberError } = await admin.from('company_members').select('company_id').eq('user_id', target.id).maybeSingle()
+    if (memberError) throw memberError
+    if (existing && existing.company_id !== company_id) return json({ error: 'Este usuario ya pertenece a otra empresa. Cada usuario normal solo puede pertenecer a una empresa.' }, 409)
     const { error } = await admin.from('company_members').upsert({ company_id, user_id: target.id, email, role }, { onConflict: 'company_id,user_id' })
     if (error) throw error
     return json({ ok: true, email })
