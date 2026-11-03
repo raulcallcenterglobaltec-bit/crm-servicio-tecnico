@@ -459,17 +459,17 @@ function showLandingCode(landing) {
 
 function showPage(name) {
   const pageName=(name==='avisos-landing'||name==='avisos-phone')?'avisos':name;
-  $('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+pageName));
-  $('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
-  const labels={'avisos-landing':'Avisos por landing','avisos-phone':'Avisos por teléfono',informes:'Informes',empresas:'Empresas',usuarios:'Usuarios y permisos',configuracion:'Configuración',integraciones:'Integraciones'};
+  $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+pageName));
+  $$('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
+  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',empresas:'Empresas',usuarios:'Usuarios y permisos',configuracion:'Configuración',integraciones:'Integraciones'};
   $('#breadcrumb').textContent='Panel / '+labels[name];
   if(pageName==='avisos'){
     noticeSource=name==='avisos-phone'?'phone':'landing';
     const phone=noticeSource==='phone';
-    $('#page-avisos h1').textContent=phone?'Avisos por teléfono':'Avisos por landing';
-    $('#page-avisos .page-head p').textContent=phone?'Registra y gestiona los avisos que recibes por llamada telefónica.':'Solicitudes recibidas desde los formularios de tus landings.';
+    $('#page-avisos h1').textContent=phone?'Avisos por teléfono':'Avisos por formulario';
+    $('#page-avisos .page-head p').textContent=phone?'Registra y gestiona los avisos que recibes por llamada telefónica.':'Solicitudes recibidas desde formularios web.';
     $('#newNotice').style.display=phone?'inline-flex':'none';
-    $('#latestNoticesTitle').textContent=phone?'Últimos avisos por teléfono':'Últimos avisos de landing';
+    $('#latestNoticesTitle').textContent=phone?'Últimos avisos por teléfono':'Últimos avisos por formulario';
     renderRows();
   }
   $('#sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'});
