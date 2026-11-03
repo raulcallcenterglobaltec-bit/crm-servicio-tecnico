@@ -22,6 +22,33 @@ function toast(message, title='Aviso') {
   el.querySelector('strong').textContent=title; el.querySelector('p').textContent=message;
   el.classList.add('show'); clearTimeout(window.toastTimer); window.toastTimer=setTimeout(()=>el.classList.remove('show'),5200);
 }
+function formDialog({title,description='',fields=[],confirmText='Guardar'}) {
+  return new Promise(resolve=>{
+    const backdrop=document.createElement('div');backdrop.className='modal-backdrop open';backdrop.style.zIndex='120';
+    const controls=fields.map(f=>{
+      const label=esc(f.label),key=esc(f.key),value=esc(f.value??''),required=f.required?'required':'';
+      let control;
+      if(f.type==='select')control=`<select name="${key}" ${required}>${(f.options||[]).map(o=>{const v=typeof o==='string'?o:o.value,l=typeof o==='string'?o:o.label;return `<option value="${esc(v)}" ${String(v)===String(f.value??'')?'selected':''}>${esc(l)}</option>`;}).join('')}</select>`;
+      else if(f.type==='textarea')control=`<textarea name="${key}" rows="3" ${required} placeholder="${esc(f.placeholder||'')}">${value}</textarea>`;
+      else control=`<input name="${key}" type="${esc(f.type||'text')}" value="${value}" ${required} placeholder="${esc(f.placeholder||'')}" ${f.autocomplete? `autocomplete="${esc(f.autocomplete)}"`:''}/>`;
+      return `<label class="field" style="margin:12px 0"><span>${label}</span>${control}</label>`;
+    }).join('');
+    backdrop.innerHTML=`<form class="modal" style="max-height:90vh;overflow:auto" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>${esc(title)}</h2><p>${esc(description)}</p></div><button class="close" type="button" data-dialog-cancel aria-label="Cerrar">×</button></div>${controls}<div class="modal-actions"><button class="outline-btn" type="button" data-dialog-cancel>Cancelar</button><button class="primary-btn" type="submit">${esc(confirmText)}</button></div></form>`;
+    const finish=value=>{backdrop.remove();resolve(value);};
+    backdrop.addEventListener('click',e=>{if(e.target===backdrop||e.target.closest('[data-dialog-cancel]'))finish(null);});
+    $('form',backdrop).addEventListener('submit',e=>{e.preventDefault();const result={};for(const f of fields){const el=$('[name="'+CSS.escape(f.key)+'"]',backdrop);result[f.key]=f.type==='number'?Number(el.value):el.value;}finish(result);});
+    document.body.append(backdrop);$('[name]',backdrop)?.focus();
+  });
+}
+function infoDialog(title,content) {
+  const backdrop=document.createElement('div');backdrop.className='modal-backdrop open';backdrop.style.zIndex='120';
+  backdrop.innerHTML=`<div class="modal" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>${esc(title)}</h2></div><button class="close" type="button">×</button></div><pre style="white-space:pre-wrap;font:13px/1.6 inherit;color:#465268">${esc(content)}</pre><div class="modal-actions"><button class="primary-btn" type="button">Cerrar</button></div></div>`;
+  document.body.append(backdrop);$('.close, .primary-btn',backdrop).forEach(b=>b.onclick=()=>backdrop.remove());backdrop.onclick=e=>{if(e.target===backdrop)backdrop.remove();};
+}
+async function confirmDialog(message) {
+  const answer=await formDialog({title:'Confirmar acción',description:message,fields:[],confirmText:'Confirmar'});
+  return answer!==null;
+}
 function errorText(error) { return error?.message || error?.details || String(error || 'Error desconocido'); }
 function formatDate(iso) { return new Date(iso).toLocaleString('es-ES',{dateStyle:'short',timeStyle:'short'}); }
 function dateOnly(iso) { return new Date(iso).toLocaleDateString('en-CA'); }
@@ -234,7 +261,7 @@ async function changeStatus(id,status) {
 function showDetails(id) {
   const n=notices.find(x=>x.id===id);if(!n)return;
   const custom=Object.entries(n.custom_fields||{}).map(([k,v])=>`${fields.find(f=>f.field_key===k)?.label||k}: ${v}`).join('\n');
-  alert(`Cliente: ${n.customer_name}\nTeléfono: ${n.phone}\nCorreo: ${n.email||'—'}\nAparato: ${n.device||'—'}\nOrigen: ${landingName(n.landing_id)}\nEstado: ${n.status}\nRecibido: ${formatDate(n.received_at)}\nLocalidad: ${n.locality||'—'}\nCódigo postal: ${n.postal_code||'—'}\nMarca: ${n.brand||'—'}\nAvería: ${n.issue||'—'}\n${custom}`);
+  infoDialog('Detalle del aviso',`Cliente: ${n.customer_name}\nTeléfono: ${n.phone}\nCorreo: ${n.email||'—'}\nAparato: ${n.device||'—'}\nOrigen: ${landingName(n.landing_id)}\nEstado: ${n.status}\nRecibido: ${formatDate(n.received_at)}\nLocalidad: ${n.locality||'—'}\nCódigo postal: ${n.postal_code||'—'}\nMarca: ${n.brand||'—'}\nAvería: ${n.issue||'—'}\n${custom}`);
 }
 function setupDate(prefix) {
   const report=prefix==='report', select=$('#'+(report?'reportPeriod':'period'));
@@ -262,7 +289,7 @@ function renderPriceRules() {
   $$('[data-tariff-landing]').forEach(x=>x.addEventListener('change',e=>updateTariff(+e.target.dataset.tariffLanding,{landing_id:e.target.value})));
   $$('[data-tariff-category]').forEach(x=>x.addEventListener('change',e=>updateTariff(+e.target.dataset.tariffCategory,{category:e.target.value})));
   $$('[data-tariff-price]').forEach(x=>x.addEventListener('change',e=>updateTariff(+e.target.dataset.tariffPrice,{price:Number(e.target.value||0)})));
-  $$('[data-tariff-delete]').forEach(x=>x.addEventListener('click',async e=>{const t=tariffs[+e.target.dataset.tariffDelete];if(!confirm('¿Eliminar esta tarifa?'))return;const {error}=await db.from('tariffs').delete().eq('id',t.id);if(error)toast(errorText(error),'Error');else{tariffs=tariffs.filter(x=>x.id!==t.id);renderPriceRules();renderRows();}}));
+  $$('[data-tariff-delete]').forEach(x=>x.addEventListener('click',async e=>{const t=tariffs[+e.target.dataset.tariffDelete];if(!await confirmDialog('¿Eliminar esta tarifa?'))return;const {error}=await db.from('tariffs').delete().eq('id',t.id);if(error)toast(errorText(error),'Error');else{tariffs=tariffs.filter(x=>x.id!==t.id);renderPriceRules();renderRows();}}));
 }
 async function updateTariff(i,changes) {
   const t=tariffs[i];const merged={...t,...changes,company_id:currentCompany.id,updated_at:new Date().toISOString()};
@@ -277,11 +304,11 @@ async function renderFields() {
   const typeNames={text:'Texto',phone:'Teléfono',email:'Correo',number:'Número',date:'Fecha',select:'Lista',textarea:'Texto largo',checkbox:'Casilla'};
   list.innerHTML=fields.map((f,i)=>`<div class="field-row" style="grid-template-columns:minmax(125px,1fr) 100px auto auto auto auto auto;gap:6px"><input data-field-label="${i}" aria-label="Nombre del campo" value="${esc(f.label)}"/><select data-field-type="${i}" aria-label="Tipo de campo">${Object.entries(typeNames).map(([key,label])=>`<option value="${key}" ${f.field_type===key?'selected':''}>${label}</option>`).join('')}</select><label><input type="checkbox" data-field-required="${i}" ${f.required?'checked':''}/> Obligatorio</label><label><input type="checkbox" data-field-table="${i}" ${f.visible_in_table?'checked':''}/> Columna</label><label><input type="checkbox" data-field-form="${i}" ${f.visible_in_form?'checked':''}/> Formulario</label><small>${f.landing_id?esc(landingName(f.landing_id)):'Todas'}</small><button class="mini-delete" data-field-delete="${i}" aria-label="Eliminar campo">×</button></div>`).join('')||'<div class="empty">Todavía no hay campos configurados.</div>';
   $$('[data-field-label]').forEach(x=>x.addEventListener('change',async e=>{const i=+e.target.dataset.fieldLabel,label=e.target.value.trim();if(!label){e.target.value=fields[i].label;return;}await saveField(i,{label});}));
-  $$('[data-field-type]').forEach(x=>x.addEventListener('change',async e=>{const i=+e.target.dataset.fieldType,field_type=e.target.value;let options=fields[i].options||[];if(field_type==='select'){const answer=prompt('Opciones separadas por comas',options.join(', '));if(answer===null){renderFields();return;}options=answer.split(',').map(v=>v.trim()).filter(Boolean);}await saveField(i,{field_type,options});}));
+  $$('[data-field-type]').forEach(x=>x.addEventListener('change',async e=>{const i=+e.target.dataset.fieldType,field_type=e.target.value;let options=fields[i].options||[];if(field_type==='select'){const answer=await formDialog({title:'Opciones del campo',description:'Escribe las opciones separadas por comas.',fields:[{key:'options',label:'Opciones',type:'text',value:options.join(', '),required:true}]});if(!answer){renderFields();return;}options=answer.options.split(',').map(v=>v.trim()).filter(Boolean);}await saveField(i,{field_type,options});}));
   $$('[data-field-required]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldRequired,{required:e.target.checked})));
   $$('[data-field-table]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldTable,{visible_in_table:e.target.checked})));
   $$('[data-field-form]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldForm,{visible_in_form:e.target.checked})));
-  $$('[data-field-delete]').forEach(x=>x.addEventListener('click',async e=>{const f=fields[+e.target.dataset.fieldDelete];if(!confirm(`¿Eliminar el campo «${f.label}» de futuras entradas?`))return;const {error}=await db.from('notice_fields').delete().eq('id',f.id);if(error)toast(errorText(error),'Error');else{fields=fields.filter(x=>x.id!==f.id);renderFields();renderRows();renderExtraFields();}}));
+  $$('[data-field-delete]').forEach(x=>x.addEventListener('click',async e=>{const f=fields[+e.target.dataset.fieldDelete];if(!await confirmDialog(`¿Eliminar el campo «${f.label}» de futuras entradas?`))return;const {error}=await db.from('notice_fields').delete().eq('id',f.id);if(error)toast(errorText(error),'Error');else{fields=fields.filter(x=>x.id!==f.id);renderFields();renderRows();renderExtraFields();}}));
 }
 async function saveField(i,changes) {
   const f=fields[i];const {data,error}=await db.from('notice_fields').update(changes).eq('id',f.id).select().single();
@@ -331,7 +358,7 @@ async function renderSettings() {
     const input=$('input[value="Global Técnicos"]',article)||$('input',article); if(input)input.value=currentCompany.name;
     const color=$('input[type=color]',article);if(color)color.value=currentCompany.primary_color||'#5267e8';
     if(currentCompany.logo_path&&$('.company-logo',article)==null){const img=document.createElement('img');img.src=currentCompany.logo_path;img.className='company-logo';img.style='max-width:140px;max-height:60px;display:block;margin:10px 0';article.append(img);}
-    if(!$('#uploadLogo')){const b=document.createElement('button');b.id='uploadLogo';b.className='outline-btn';b.textContent='Subir logo';const file=document.createElement('input');file.type='file';file.accept='image/png,image/jpeg,image/webp,image/svg+xml';file.id='logoFile';file.hidden=true;article.append(file,b);b.onclick=()=>file.click();file.onchange=uploadLogo;}
+    if(!$('#uploadLogo')){const b=document.createElement('button');b.id='uploadLogo';b.className='outline-btn';b.textContent='Subir logo';const file=document.createElement('input');file.type='file';file.accept='image/png,image/jpeg,image/webp,image/svg+xml';file.id='logoFile';file.style='display:block;margin:10px 0;max-width:100%';file.setAttribute('aria-label','Seleccionar archivo de logo');b.textContent='Subir logo';article.append(file,b);b.onclick=()=>file.click();file.onchange=uploadLogo;}
   }
   renderFields();renderPriceRules();
 }
@@ -359,100 +386,37 @@ function renderCompanyPage() {
   let grid=$('.simple-grid',section);if(!grid)return;
   grid.innerHTML=companies.map(c=>`<button class="placeholder-tile" data-company-card="${c.id}" style="text-align:left;cursor:pointer"><div class="company-badge">${esc(c.name.slice(0,2).toUpperCase())}</div><strong>${esc(c.name)}</strong><small>${c.id===currentCompany.id?'Empresa actual':'Cambiar a esta empresa'}</small></button>`).join('')||'<div class="empty">Crea tu primera empresa.</div>';
   $$('[data-company-card]',grid).forEach(b=>b.onclick=()=>{currentCompany=companies.find(c=>c.id===b.dataset.companyCard);renderCompanyPicker();loadCompanyData();});
-  const add=$('.page-head .primary-btn',section);if(add){add.onclick=async()=>{const name=prompt('Nombre de la nueva empresa');if(!name?.trim())return;const {data,error}=await db.rpc('create_company_for_self',{company_name:name.trim()});if(error)toast(errorText(error),'No se pudo crear');else await loadMemberships();};}
+  const add=$('.page-head .primary-btn',section);if(add){add.onclick=async()=>{const answer=await formDialog({title:'Añadir empresa',description:'La nueva empresa tendrá sus propios avisos y configuración.',fields:[{key:'name',label:'Nombre de la empresa',required:true}]});if(!answer?.name.trim())return;const name=answer.name;const {data,error}=await db.rpc('create_company_for_self',{company_name:name.trim()});if(error)toast(errorText(error),'No se pudo crear');else await loadMemberships();};}
 }
 function renderMembers() {
   const section=$('#page-usuarios');if(!section)return;
   const grid=$('.simple-grid',section);if(grid)grid.innerHTML=members.map(m=>`<div class="placeholder-tile"><strong>${esc(m.email||m.user_id.slice(0,8))}</strong><small>${esc(m.role)}</small>${m.role==='owner'?'':`<button class="mini-delete" data-remove-member="${m.user_id}" aria-label="Quitar usuario">×</button>`}</div>`).join('')||'<div class="empty">No hay usuarios.</div>';
-  $$('[data-remove-member]',section).forEach(b=>b.onclick=async()=>{if(!confirm('¿Retirar este usuario de la empresa?'))return;const {error}=await db.from('company_members').delete().eq('company_id',currentCompany.id).eq('user_id',b.dataset.removeMember);if(error)toast(errorText(error),'No se pudo retirar');else{members=members.filter(m=>m.user_id!==b.dataset.removeMember);renderMembers();}});
-  const add=$('.page-head .primary-btn',section);if(add)add.onclick=async()=>{const email=prompt('Correo del nuevo usuario');if(!email?.trim())return;const role=prompt('Rol: admin, gestor o consulta','gestor');if(!['admin','gestor','consulta'].includes(role))return toast('El rol debe ser admin, gestor o consulta.');const {error}=await db.functions.invoke('invite-member',{body:{company_id:currentCompany.id,email:email.trim(),role}});toast(error?errorText(error):'Invitación enviada. El usuario recibirá un correo para acceder.',error?'No se pudo invitar':'Invitación enviada');};
+  $$('[data-remove-member]',section).forEach(b=>b.onclick=async()=>{if(!await confirmDialog('¿Retirar este usuario de la empresa?'))return;const {error}=await db.from('company_members').delete().eq('company_id',currentCompany.id).eq('user_id',b.dataset.removeMember);if(error)toast(errorText(error),'No se pudo retirar');else{members=members.filter(m=>m.user_id!==b.dataset.removeMember);renderMembers();}});
+  const add=$('.page-head .primary-btn',section);if(add)add.onclick=async()=>{const answer=await formDialog({title:'Invitar usuario',description:'Elige el correo y los permisos para esta empresa.',fields:[{key:'email',label:'Correo electrónico',type:'email',required:true,autocomplete:'email'},{key:'role',label:'Permiso',type:'select',value:'gestor',options:['admin','gestor','consulta']}]});if(!answer)return;const {error}=await db.functions.invoke('invite-member',{body:{company_id:currentCompany.id,email:answer.email.trim(),role:answer.role}});toast(error?errorText(error):'Invitación enviada. El usuario recibirá un correo para acceder.',error?'No se pudo invitar':'Invitación enviada');};
 }
 async function renderIntegrations() {
   const section=$('#page-integraciones');if(!section)return;
   const old=$('.demo-banner',section);if(old)old.remove();
   const grid=$('.simple-grid',section);if(!grid)return;
   grid.innerHTML=`<article class="card simple-card"><div class="metric-icon">⌘</div><h2>Formularios web</h2><p>Conecta una landing y copia su endpoint y código de envío.</p><button class="outline-btn" id="addLanding" style="margin-top:10px">＋ Añadir landing</button><div id="landingIntegrations" style="display:grid;gap:12px;margin-top:14px"></div></article><article class="card simple-card"><div class="metric-icon" style="background:#e7f4ff;color:#2685c5">➤</div><h2>Telegram</h2><p>Notifica la llegada de avisos en el chat de la empresa.</p><div class="button-row"><button class="outline-btn" id="setupTelegram">Configurar Telegram</button><button class="outline-btn" id="testTelegram">Enviar prueba</button></div></article><article class="card simple-card"><div class="metric-icon amber">✉</div><h2>Correo electrónico</h2><p>Envía avisos a las direcciones que elijas mediante Resend.</p><div class="button-row"><button class="outline-btn" id="setupEmail">Configurar correo</button><button class="outline-btn" id="testEmail">Enviar prueba</button></div></article>`;
-  $('#addLanding').onclick=async()=>{const name=prompt('Nombre de la landing');if(!name?.trim())return;const url=prompt('URL de la landing (opcional)','')||null;const domains=prompt('Orígenes permitidos, separados por comas (ej. https://dominio.com)','')||'';const allowed_origins=domains.split(',').map(x=>x.trim()).filter(Boolean);const {data,error}=await db.from('landings').insert({company_id:currentCompany.id,name:name.trim(),url,allowed_origins}).select().single();if(error){toast(errorText(error),'No se pudo crear la landing');return;}landings.push(data);landings.sort((a,b)=>a.name.localeCompare(b.name));await loadCompanyData();showLandingCode(data);};
+  $('#addLanding').onclick=async()=>{const answer=await formDialog({title:'Añadir landing',description:'Conecta un formulario web a esta empresa.',fields:[{key:'name',label:'Nombre de la landing',required:true},{key:'url',label:'URL de la landing',placeholder:'https://ejemplo.com'},{key:'domains',label:'Orígenes permitidos (separados por comas)',placeholder:'https://ejemplo.com'}]});if(!answer?.name.trim())return;const name=answer.name,url=answer.url.trim()||null,domains=answer.domains||'';const allowed_origins=domains.split(',').map(x=>x.trim()).filter(Boolean);const {data,error}=await db.from('landings').insert({company_id:currentCompany.id,name:name.trim(),url,allowed_origins}).select().single();if(error){toast(errorText(error),'No se pudo crear la landing');return;}landings.push(data);landings.sort((a,b)=>a.name.localeCompare(b.name));await loadCompanyData();showLandingCode(data);};
   $('#setupTelegram').onclick=()=>configureIntegration('telegram');
   $('#setupEmail').onclick=()=>configureIntegration('email');
   $('#testTelegram').onclick=()=>testIntegration('telegram');$('#testEmail').onclick=()=>testIntegration('email');
   const host=$('#landingIntegrations');
   host.innerHTML=landings.map(l=>`<div class="placeholder-tile"><strong>${esc(l.name)}${l.is_active?'':' · Inactiva'}</strong><small>${esc(l.url||'Sin URL guardada')}</small><div class="button-row"><button class="outline-btn" data-code="${l.id}">Ver conexión</button><button class="mini-delete" data-delete-landing="${l.id}" aria-label="Desactivar landing">×</button></div></div>`).join('')||'<div class="empty">Todavía no hay landings conectadas.</div>';
   $$('[data-code]',host).forEach(b=>b.onclick=()=>showLandingCode(landings.find(l=>l.id===b.dataset.code)));
-  $$('[data-delete-landing]',host).forEach(b=>b.onclick=async()=>{if(!confirm('¿Desactivar esta landing? Sus avisos y tarifas históricas se conservarán.'))return;const {error}=await db.from('landings').update({is_active:false}).eq('id',b.dataset.deleteLanding);if(error)toast(errorText(error),'No se pudo desactivar');else await loadCompanyData();});
+  $$('[data-delete-landing]',host).forEach(b=>b.onclick=async()=>{if(!await confirmDialog('¿Desactivar esta landing? Sus avisos y tarifas históricas se conservarán.'))return;const {error}=await db.from('landings').update({is_active:false}).eq('id',b.dataset.deleteLanding);if(error)toast(errorText(error),'No se pudo desactivar');else await loadCompanyData();});
 }
 async function configureIntegration(kind) {
   let config={};
   if(kind==='telegram') {
-    config.bot_token=prompt('Token del bot de Telegram (BotFather)');if(!config.bot_token)return;
-    config.chat_id=prompt('ID del chat o grupo donde recibir los avisos');if(!config.chat_id)return;
+    const answer=await formDialog({title:'Configurar Telegram',description:'Introduce los datos del bot y el chat de destino.',fields:[{key:'bot_token',label:'Token del bot',type:'password',required:true},{key:'chat_id',label:'ID del chat o grupo',required:true}]});
+    if(!answer)return;config=answer;
   } else {
-    config.api_key=prompt('API key de Resend');if(!config.api_key)return;
-    config.from=prompt('Remitente verificado (ej. CRM <avisos@tudominio.com>)');if(!config.from)return;
-    config.to=prompt('Correos destinatarios, separados por comas');if(!config.to)return;
-    config.to=config.to.split(',').map(x=>x.trim()).filter(Boolean);
+    const answer=await formDialog({title:'Configurar correo',description:'Datos del servicio de envío Resend.',fields:[{key:'api_key',label:'API key de Resend',type:'password',required:true},{key:'from',label:'Remitente verificado',placeholder:'CRM <avisos@dominio.com>',required:true},{key:'to',label:'Correos destinatarios (separados por comas)',type:'textarea',required:true}]});
+    if(!answer)return;config={...answer,to:answer.to.split(',').map(x=>x.trim()).filter(Boolean)};
   }
   const {error}=await db.functions.invoke('manage-integration',{body:{company_id:currentCompany.id,kind,config,enabled:true}});
   toast(error?errorText(error):'Integración guardada de forma privada.',error?'No se pudo guardar':'Conexión guardada');
 }
-async function testIntegration(kind) {
-  const {error}=await db.functions.invoke('notify-test',{body:{company_id:currentCompany.id,kind}});
-  toast(error?errorText(error):'Mensaje de prueba enviado.',error?'No se pudo enviar':'Prueba enviada');
-}
-function showLandingCode(landing) {
-  if(!landing)return;
-  const endpoint=CFG.url.replace(/\/$/,'')+'/functions/v1/service-form';
-  const code=`fetch('${endpoint}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({landing_key:'${landing.endpoint_key}',data:{customer_name:'Nombre',phone:'600000000',device:'Lavadora',issue:'Descripción de la avería'}})}).then(r=>r.json())`;
-  const backdrop=document.createElement('div');backdrop.className='modal-backdrop open';backdrop.innerHTML=`<div class="modal" style="max-width:640px"><div class="modal-head"><div><h2>Conectar ${esc(landing.name)}</h2><p>Endpoint y ejemplo de envío desde el formulario.</p></div><button class="close">×</button></div><p><strong>URL:</strong></p><div class="integration-code">${esc(endpoint)}</div><p><strong>Clave de landing:</strong></p><div class="integration-code">${esc(landing.endpoint_key)}</div><p><strong>Ejemplo JavaScript:</strong></p><div class="integration-code">${esc(code)}</div><div class="modal-actions"><button class="outline-btn" id="copyLandingCode">Copiar código</button><button class="primary-btn close-code">Cerrar</button></div></div>`;
-  document.body.append(backdrop);$('.close',backdrop).onclick=()=>backdrop.remove();$('.close-code',backdrop).onclick=()=>backdrop.remove();$('#copyLandingCode',backdrop).onclick=async()=>{await navigator.clipboard.writeText(code);toast('Código copiado.');};
-}
-
-function showPage(name) {
-  $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+name));
-  $$('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
-  const labels={avisos:'Avisos',informes:'Informes',empresas:'Empresas',usuarios:'Usuarios y permisos',configuracion:'Configuración',integraciones:'Integraciones'};
-  $('#breadcrumb').textContent='Panel / '+labels[name];$('#sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'});
-}
-function wireUI() {
-  $('#sidebar').addEventListener('click',event=>{const button=event.target.closest('button[data-page]');if(button){event.preventDefault();showPage(button.dataset.page);}});
-  setupDate('main');setupDate('report');
-  ['tableSearch','globalSearch'].forEach(id=>$('#'+id).addEventListener('input',renderRows));
-  ['statusFilter','landingFilter','weekdayFilter'].forEach(id=>$('#'+id).addEventListener('change',renderRows));
-  $('#reportWeekday').addEventListener('change',renderReport);
-  $('#newNotice').addEventListener('click',()=>{$('#fLanding').innerHTML=landingOptions();renderExtraFields();$('#modal').classList.add('open');$('#fName').focus();});
-  $('#fLanding').addEventListener('change',()=>{syncDefaultFields();renderExtraFields();});
-  $('#closeModal').addEventListener('click',()=>$('#modal').classList.remove('open'));
-  $('#cancelModal').addEventListener('click',()=>$('#modal').classList.remove('open'));
-  $('#modal').addEventListener('click',e=>{if(e.target.id==='modal')e.currentTarget.classList.remove('open');});
-  $('#noticeForm').addEventListener('submit',createNotice);
-  $('#menuToggle').addEventListener('click',()=>$('#sidebar').classList.toggle('open'));
-  $('#showToast').addEventListener('click',()=>toast('Los avisos nuevos aparecerán aquí al entrar desde una landing.','Notificaciones'));
-  $('#exportBtn').addEventListener('click',()=>exportCsv(false));$('#reportExport').addEventListener('click',()=>exportCsv(true));
-  $('#addField').addEventListener('click',addField);
-  $('#saveSettings').addEventListener('click',saveCompanySettings);
-  $('#addPrice').addEventListener('click',addTariff);
-}
-async function addField() {
-  const label=$('#newFieldName').value.trim();if(!label)return;
-  const field_type=({Texto:'text',Número:'number',Fecha:'date',Lista:'select',Casilla:'checkbox'})[$('#newFieldType').value]||'text';
-  const key=label.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
-  const options=field_type==='select'?(prompt('Opciones separadas por comas')||'').split(',').map(x=>x.trim()).filter(Boolean):[];
-  const landing_id=$('#newFieldLanding')?.value||null;
-  const {data,error}=await db.from('notice_fields').insert({company_id:currentCompany.id,landing_id,field_key:key,label,field_type,options,required:false,visible_in_form:true,visible_in_table:true,position:fields.length+1}).select().single();
-  if(error){toast(errorText(error),'No se pudo añadir');return;}fields.push(data);$('#newFieldName').value='';renderFields();renderRows();renderExtraFields();
-}
-async function addTariff() {
-  if(!landings.length){toast('Crea primero una landing.');return;}
-  const next=landings.flatMap(l=>['Gama blanca','Clima'].map(category=>({landing_id:l.id,category}))).find(candidate=>!tariffs.some(t=>t.landing_id===candidate.landing_id&&t.category===candidate.category));
-  if(!next){toast('Ya hay una tarifa para Gama blanca y Clima en cada landing.');return;}
-  const {data,error}=await db.from('tariffs').insert({...next,company_id:currentCompany.id,price:0}).select().single();
-  if(error){toast(errorText(error),'No se pudo crear tarifa');return;}tariffs.push(data);renderPriceRules();
-}
-async function exportCsv(report=false) {
-  const rows=filteredNotices(report);
-  const columns=['Recibido','Estado','Cliente','Teléfono','Correo','Landing','Aparato','Categoría','Localidad','Código postal','Marca','Avería','Importe',...fields.filter(f=>f.visible_in_table).map(f=>f.label)];
-  const csv=[columns,...rows.map(n=>[formatDate(n.received_at),n.status,n.customer_name,n.phone,n.email||'',landingName(n.landing_id),n.device||'',n.category||'',n.locality||'',n.postal_code||'',n.brand||'',n.issue||'',n.status==='Sale'?n.unit_price:'',...fields.filter(f=>f.visible_in_table).map(f=>n.custom_fields?.[f.field_key]??n[f.field_key]??'')])].map(r=>r.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(',')).join('\r\n');
-  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));a.download='avisos-'+new Date().toISOString().slice(0,10)+'.csv';a.click();URL.revokeObjectURL(a.href);
-}
-document.addEventListener('DOMContentLoaded',()=>{wireUI();openAuth();if(!db)return;db.auth.getSession().then(({data,error})=>{if(error){$('#authError').textContent=errorText(error);return;}if(data.session){user=data.session.user;loadMemberships().catch(e=>$('#authError').textContent=errorText(e));}});db.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_IN'&&session){user=session.user;setTimeout(()=>loadMemberships().catch(e=>{$('#authError').textContent=errorText(e);openAuth();}),0);}if(event==='SIGNED_OUT'){user=null;location.reload();}});});
-
