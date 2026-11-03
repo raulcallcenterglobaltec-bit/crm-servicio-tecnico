@@ -8,7 +8,7 @@ const money = value => Number(value || 0).toLocaleString('es-ES',{minimumFractio
 const categoryFor = device => /aire acondicionado|aerotermia|bomba de calor|acs|caldera|calentador|termo/i.test(String(device||'')) ? 'Clima' : (device ? 'Gama blanca' : null);
 let user=null, isSuperAdmin=false, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, noticeSource='landing', fieldScope='phone', noticeView='table', relatedNoticeMatch=null, selectedHistoryKey=null;
 let fieldEditorRows=[];
-let authMode='login', selectedDate=new Date().toISOString().slice(0,10);
+let authMode='login', selectedDate=new Date().toISOString().slice(0,10), showResendConfirmation=false;
 const defaultFields=[
   {field_key:'customer_name',label:'Nombre y apellidos',field_type:'text',required:true,visible_in_form:true,visible_in_table:true,visible_on_card:true,position:1},
   {field_key:'phone',label:'Teléfono',field_type:'phone',required:true,visible_in_form:true,visible_in_table:true,visible_on_card:true,position:2},
@@ -61,14 +61,16 @@ function dateOnly(iso) { return new Date(iso).toLocaleDateString('en-CA'); }
 function openAuth() {
   if($('#authScreen')) return;
   const style=document.createElement('style');
-  style.textContent=`.auth-screen{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:linear-gradient(135deg,#eef1ff,#f8f9fc 55%,#e9f5f1);padding:18px}.auth-card{width:min(440px,100%);background:white;border:1px solid #e4e8f1;border-radius:18px;box-shadow:0 24px 70px #1a26431a;padding:30px}.auth-mark{width:44px;height:44px;border-radius:13px;display:grid;place-items:center;color:white;font-size:20px;font-weight:800;background:linear-gradient(145deg,var(--accent-gradient-start),var(--accent));margin-bottom:18px}.auth-card h1{margin:0 0 7px;font-size:24px;color:#182235}.auth-card p{margin:0 0 20px;color:#788397;font-size:13px}.auth-card form{display:grid;gap:12px}.auth-card label{display:grid;gap:6px;color:#58647a;font-size:12px;font-weight:600}.auth-card input{height:42px;border:1px solid #dfe3ec;border-radius:8px;padding:0 12px;font:inherit}.auth-actions{display:flex;align-items:center;justify-content:space-between;margin-top:16px}.auth-actions button{border:0;background:none;color:var(--accent);font-weight:650;cursor:pointer}.auth-error{min-height:18px;color:#bf4257;font-size:12px;margin-top:11px}.auth-muted{font-size:11px;color:#8893a6;margin-top:14px;line-height:1.5}.auth-screen .primary-btn{height:42px;font-size:13px}.user{gap:7px}.signout-btn{border:1px solid var(--line);background:#fff;color:#657186;border-radius:8px;padding:7px 9px;font-size:11px}.company-select select{border:0;background:transparent;color:#334057;font:inherit;max-width:180px;outline:none}.integration-code{white-space:pre-wrap;word-break:break-all;background:#f5f6fa;border:1px solid #e3e7ef;border-radius:8px;padding:11px;font:11px/1.5 ui-monospace,monospace;color:#48546a}.danger-text{color:#be4357}.button-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.field-row{gap:10px}.company-select{cursor:pointer}`;
+  style.textContent=`.auth-screen{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:linear-gradient(135deg,#eef1ff,#f8f9fc 55%,#e9f5f1);padding:18px}.auth-card{width:min(440px,100%);background:white;border:1px solid #e4e8f1;border-radius:18px;box-shadow:0 24px 70px #1a26431a;padding:30px}.auth-mark{width:44px;height:44px;border-radius:13px;display:grid;place-items:center;color:white;font-size:20px;font-weight:800;background:linear-gradient(145deg,var(--accent-gradient-start),var(--accent));margin-bottom:18px}.auth-card h1{margin:0 0 7px;font-size:24px;color:#182235}.auth-card p{margin:0 0 20px;color:#788397;font-size:13px}.auth-card form{display:grid;gap:12px}.auth-card label{display:grid;gap:6px;color:#58647a;font-size:12px;font-weight:600}.auth-card input{height:42px;border:1px solid #dfe3ec;border-radius:8px;padding:0 12px;font:inherit}.auth-actions{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-top:16px}.auth-actions button{border:0;background:none;color:var(--accent);font-weight:650;cursor:pointer}.auth-error{min-height:18px;color:#bf4257;font-size:12px;margin-top:11px}.auth-muted{font-size:11px;color:#8893a6;margin-top:14px;line-height:1.5}.auth-screen .primary-btn{height:42px;font-size:13px}.user{gap:7px}.signout-btn{border:1px solid var(--line);background:#fff;color:#657186;border-radius:8px;padding:7px 9px;font-size:11px}.company-select select{border:0;background:transparent;color:#334057;font:inherit;max-width:180px;outline:none}.integration-code{white-space:pre-wrap;word-break:break-all;background:#f5f6fa;border:1px solid #e3e7ef;border-radius:8px;padding:11px;font:11px/1.5 ui-monospace,monospace;color:#48546a}.danger-text{color:#be4357}.button-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.field-row{gap:10px}.company-select{cursor:pointer}`;
   document.head.append(style);
   const screen=document.createElement('div');screen.className='auth-screen';screen.id='authScreen';
-  screen.innerHTML=`<section class="auth-card"><div class="auth-mark">S</div><h1>CRM Gestión de avisos</h1><p id="authIntro">Accede a los avisos y la configuración de tu empresa.</p><form id="authForm"><label>Correo electrónico<input id="authEmail" type="email" autocomplete="email" required placeholder="nombre@empresa.com"/></label><label>Contraseña<input id="authPassword" type="password" autocomplete="current-password" minlength="8" required placeholder="Mínimo 8 caracteres"/></label><button class="primary-btn" id="authSubmit" type="submit">Entrar</button></form><div class="auth-error" id="authError" role="status" aria-live="polite"></div><div class="auth-actions"><button id="authSwitch" type="button">Crear cuenta</button><button id="forgotPassword" type="button">He olvidado la contraseña</button></div><div class="auth-muted" id="authNote">Cada empresa y sus avisos quedan aislados por permisos de base de datos.</div></section>`;
+  screen.innerHTML=`<section class="auth-card"><div class="auth-mark">S</div><h1>CRM Gestión de avisos</h1><p id="authIntro">Accede a los avisos y la configuración de tu empresa.</p><form id="authForm"><label>Correo electrónico<input id="authEmail" type="email" autocomplete="email" required placeholder="nombre@empresa.com"/></label><label>Contraseña<input id="authPassword" type="password" autocomplete="current-password" minlength="8" required placeholder="Mínimo 8 caracteres"/></label><button class="primary-btn" id="authSubmit" type="submit">Entrar</button></form><div class="auth-error" id="authError" role="status" aria-live="polite"></div><div class="auth-actions"><button id="authSwitch" type="button">Crear cuenta</button><button id="resendConfirmation" type="button" hidden>Reenviar verificación</button><button id="forgotPassword" type="button">He olvidado la contraseña</button></div><div class="auth-muted" id="authNote">Cada empresa y sus avisos quedan aislados por permisos de base de datos.</div></section>`;
   document.body.append(screen);
+  const pendingEmail=localStorage.getItem('crm-pending-confirmation-email');if(pendingEmail){$('#authEmail').value=pendingEmail;showResendConfirmation=true;$('#resendConfirmation').hidden=false;}
   $('#authForm').addEventListener('submit',handleAuth);
   $('#authSwitch').addEventListener('click',()=>setAuthMode(authMode==='login'?'signup':'login'));
   $('#forgotPassword').addEventListener('click',resetPassword);
+  $('#resendConfirmation').addEventListener('click',resendConfirmation);
   if(!hasBackend) {
     $('#authIntro').textContent='La conexión segura con la base de datos independiente está pendiente de activación.';
     $('#authError').textContent='El panel ya está publicado. Estoy preparando el proyecto de datos y el acceso.';
@@ -83,6 +85,7 @@ function setAuthMode(mode) {
   $('#authSubmit').textContent=mode==='login'?'Entrar':'Crear cuenta';
   $('#authSwitch').textContent=mode==='login'?'Crear cuenta':'Ya tengo cuenta';
   $('#forgotPassword').hidden=mode!=='login';
+  $('#resendConfirmation').hidden=!showResendConfirmation;
   $('#authPassword').autocomplete=mode==='login'?'current-password':'new-password';
 }
 async function handleAuth(event) {
@@ -92,19 +95,29 @@ async function handleAuth(event) {
   try {
     if(authMode==='login') {
       const {error}=await db.auth.signInWithPassword({email,password}); if(error)throw error;
-      message.textContent='Acceso correcto.';
+      localStorage.removeItem('crm-pending-confirmation-email');showResendConfirmation=false;message.textContent='Acceso correcto.';
     } else {
       localStorage.removeItem('crm-service-first-company');
-      const {data,error}=await db.auth.signUp({email,password});
+      const {data,error}=await db.auth.signUp({email,password,options:{emailRedirectTo:appRedirectUrl()}});
       if(error)throw error;
       if(data.session) {
         message.textContent='Cuenta creada. El superadministrador debe asignarte a una empresa para acceder.';
       } else {
         message.textContent='Te enviamos un correo para confirmar la cuenta. Después vuelve aquí e inicia sesión.';
+        localStorage.setItem('crm-pending-confirmation-email',email);showResendConfirmation=true;$('#resendConfirmation').hidden=false;
       }
     }
-  } catch(error) { message.textContent=errorText(error); }
+  } catch(error) { message.textContent=errorText(error);if(/confirm|not verified|not confirmed/i.test(String(error?.message||''))){showResendConfirmation=true;$('#resendConfirmation').hidden=false;} }
   finally { $('#authSubmit').disabled=false; }
+}
+function appRedirectUrl() { return new URL('./',window.location.href).toString(); }
+async function resendConfirmation() {
+  if(!db)return;
+  const email=$('#authEmail').value.trim();if(!email){$('#authError').textContent='Escribe primero tu correo electrónico.';return;}
+  const button=$('#resendConfirmation');button.disabled=true;
+  const {error}=await db.auth.resend({type:'signup',email,options:{emailRedirectTo:appRedirectUrl()}});
+  $('#authError').textContent=error?errorText(error):'Te hemos enviado otro correo de verificación. Abre el enlace y vuelve al CRM.';
+  button.disabled=false;
 }
 async function resetPassword() {
   if(!db)return;
