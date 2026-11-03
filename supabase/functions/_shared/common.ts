@@ -88,6 +88,18 @@ export async function sendNoticeNotifications(admin: SupabaseClient, companyId: 
           body: JSON.stringify({ from: config.from, to, subject: title, text: message, html: `<pre style="font:14px sans-serif;white-space:pre-wrap">${htmlEscape(message)}</pre>` }),
         })
         if (!response.ok) throw new Error(`Correo respondió ${response.status}`)
+      } else if (item.kind === 'whatsapp') {
+        const params = test
+          ? ['CRM Servicio Técnico','Prueba', 'CRM Servicio Técnico', '34600000000', 'Aviso de prueba']
+          : [landingName, time, notice.customer_name || '—', notice.phone || '—', notice.device || '—']
+        const response = await fetch(`https://graph.facebook.com/v26.0/${encodeURIComponent(config.phone_number_id)}/messages`, {
+          method: 'POST', headers: { Authorization: `Bearer ${config.access_token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: String(config.to).replace(/\D/g, ''), type: 'template', template: { name: config.template_name, language: { code: config.language || 'es' }, components: [{ type: 'body', parameters: params.map(text => ({ type: 'text', text: String(text) })) }] } }),
+        })
+        if (!response.ok) {
+          const result = await response.json().catch(() => null)
+          throw new Error(result?.error?.message || `WhatsApp respondió ${response.status}`)
+        }
       }
       results.push({ kind: item.kind, ok: true })
     } catch (error) {
