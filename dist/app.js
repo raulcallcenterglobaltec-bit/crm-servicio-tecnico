@@ -194,7 +194,9 @@ function landingName(id) { return landings.find(l=>l.id===id)?.name||'Entrada ma
 function landingOptions(selected='') { return '<option value="">Sin landing</option>'+landings.filter(l=>l.is_active).map(l=>`<option value="${l.id}" ${selected===l.id?'selected':''}>${esc(l.name)}</option>`).join(''); }
 function renderLandingOptions() {
   const filters=$('#landingFilter');if(filters)filters.innerHTML='<option value="all">Todas las landings</option>'+landings.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');
-  const fieldLanding=$('#newFieldLanding');if(fieldLanding){const chosen=fieldLanding.value;fieldLanding.innerHTML='<option value="">Todas las landings</option>'+landings.filter(l=>l.is_active).map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');fieldLanding.value=chosen;}
+  const landingChoices='<option value="">Todas las landings</option>'+landings.filter(l=>l.is_active).map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');
+  const fieldLanding=$('#newFieldLanding');if(fieldLanding){const chosen=fieldLanding.value;fieldLanding.innerHTML=landingChoices;fieldLanding.value=chosen;}
+  const fieldFilter=$('#fieldLandingFilter');if(fieldFilter){const chosen=fieldFilter.value;fieldFilter.innerHTML='<option value="">Campos generales (todas las landings)</option>'+landings.filter(l=>l.is_active).map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');fieldFilter.value=chosen;}
 }
 function statusLabel(s) { return s==='Sale'?'Aviso Sacado':s==='No sale'?'Aviso Nulo':s==='Nuevo'?'Nuevo':'—'; }
 function statusClass(s) { return s==='Sale'?'sold':s==='No sale'?'lost':'new'; }
@@ -314,12 +316,13 @@ async function updateTariff(i,changes) {
 }
 async function renderFields() {
   const list=$('#fieldList');if(!list)return;
-  fieldEditorRows=fields.filter(f=>f.channel===fieldScope);
-  const title=$('#fieldEditorTitle');if(title)title.textContent=fieldScope==='phone'?'Campos de aviso por teléfono':'Campos del formulario por landing';
-  const description=$('#fieldEditorDescription');if(description)description.textContent=fieldScope==='phone'?'Configura los datos de los avisos que se reciben por teléfono.':'Configura los datos que recogen los formularios de las landing.';
-  const landingWrap=$('#newFieldLandingWrap');if(landingWrap)landingWrap.hidden=fieldScope==='phone';
+  const selectedLanding=fieldScope==='landing'?($('#fieldLandingFilter')?.value||''):null;
+  fieldEditorRows=fields.filter(f=>f.channel===fieldScope&&(fieldScope==='phone'?!f.landing_id:(selectedLanding?f.landing_id===selectedLanding:!f.landing_id)));
+  const title=$('#fieldEditorTitle');if(title)title.textContent=fieldScope==='phone'?'Campos de aviso por teléfono':'Campos de aviso por landing';
+  const description=$('#fieldEditorDescription');if(description)description.textContent=fieldScope==='phone'?'Configura los datos de los avisos que se reciben por teléfono.':'Los campos generales se aplican a todas las landing. Selecciona una landing para configurar sus campos específicos.';
+  const landingWrap=$('#landingFieldControls');if(landingWrap)landingWrap.hidden=fieldScope==='phone';
   const typeNames={text:'Texto',phone:'Teléfono',email:'Correo',number:'Número',date:'Fecha',select:'Lista',textarea:'Texto largo',checkbox:'Casilla'};
-  list.innerHTML=fieldEditorRows.map((f,i)=>`<div class="field-row" style="grid-template-columns:minmax(125px,1fr) 100px auto auto auto auto auto;gap:6px"><input data-field-label="${i}" aria-label="Nombre del campo" value="${esc(f.label)}"/><select data-field-type="${i}" aria-label="Tipo de campo">${Object.entries(typeNames).map(([key,label])=>`<option value="${key}" ${f.field_type===key?'selected':''}>${label}</option>`).join('')}</select><label><input type="checkbox" data-field-required="${i}" ${f.required?'checked':''}/> Obligatorio</label><label><input type="checkbox" data-field-table="${i}" ${f.visible_in_table?'checked':''}/> Columna</label><label><input type="checkbox" data-field-form="${i}" ${f.visible_in_form?'checked':''}/> Formulario</label><small>${f.landing_id?esc(landingName(f.landing_id)):'Todas'}</small><button class="mini-delete" data-field-delete="${i}" aria-label="Eliminar campo">×</button></div>`).join('')||'<div class="empty">Todavía no hay campos configurados.</div>';
+  list.innerHTML=fieldEditorRows.map((f,i)=>`<div class="field-row" style="grid-template-columns:minmax(125px,1fr) 100px auto auto auto auto auto;gap:6px"><input data-field-label="${i}" aria-label="Nombre del campo" value="${esc(f.label)}"/><select data-field-type="${i}" aria-label="Tipo de campo">${Object.entries(typeNames).map(([key,label])=>`<option value="${key}" ${f.field_type===key?'selected':''}>${label}</option>`).join('')}</select><label><input type="checkbox" data-field-required="${i}" ${f.required?'checked':''}/> Obligatorio</label><label><input type="checkbox" data-field-table="${i}" ${f.visible_in_table?'checked':''}/> Columna</label><label><input type="checkbox" data-field-form="${i}" ${f.visible_in_form?'checked':''}/> Formulario</label><small>${f.landing_id?esc(landingName(f.landing_id)):'Todas'}</small><button class="mini-delete" data-field-delete="${i}" aria-label="Eliminar campo">×</button></div>`).join('')||'<div class="empty">No hay campos exclusivos en esta selección. Los campos generales se mantienen si has seleccionado una landing.</div>';
   $$('[data-field-label]').forEach(x=>x.addEventListener('change',async e=>{const i=+e.target.dataset.fieldLabel,label=e.target.value.trim();if(!label){e.target.value=fieldEditorRows[i].label;return;}await saveField(i,{label});}));
   $$('[data-field-type]').forEach(x=>x.addEventListener('change',async e=>{const i=+e.target.dataset.fieldType,field_type=e.target.value;let options=fieldEditorRows[i].options||[];if(field_type==='select'){const answer=await formDialog({title:'Opciones del campo',description:'Escribe las opciones separadas por comas.',fields:[{key:'options',label:'Opciones',type:'text',value:options.join(', '),required:true}]});if(!answer){renderFields();return;}options=answer.options.split(',').map(v=>v.trim()).filter(Boolean);}await saveField(i,{field_type,options});}));
   $$('[data-field-required]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldRequired,{required:e.target.checked})));
@@ -371,8 +374,10 @@ async function createNotice(event) {
 }
 function showSettingsTab(name) {
   $$('[data-settings-tab]').forEach(button=>button.classList.toggle('active',button.dataset.settingsTab===name));
-  $$('[data-settings-panel]').forEach(panel=>panel.classList.toggle('active',panel.dataset.settingsPanel===name));
-  if(name==='fields')renderFields();
+  const panelName=(name==='phone-fields'||name==='landing-fields')?'fields':name;
+  $$('[data-settings-panel]').forEach(panel=>panel.classList.toggle('active',panel.dataset.settingsPanel===panelName));
+  if(name==='phone-fields'){fieldScope='phone';renderFields();}
+  if(name==='landing-fields'){fieldScope='landing';renderFields();}
 }
 async function renderSettings() {
   if(!currentCompany)return;
@@ -502,8 +507,8 @@ function wireUI() {
   $('#showToast').addEventListener('click',()=>toast('Los avisos nuevos aparecerán aquí al entrar desde una landing.','Notificaciones'));
   $('#exportBtn').addEventListener('click',()=>exportCsv(false));$('#reportExport').addEventListener('click',()=>exportCsv(true));
   $('#addField').addEventListener('click',addField);
-  $('#fieldScope').addEventListener('change',e=>{fieldScope=e.target.value;renderFields();});
   $$('[data-settings-tab]').forEach(button=>button.addEventListener('click',()=>showSettingsTab(button.dataset.settingsTab)));
+  $('#fieldLandingFilter').addEventListener('change',()=>{$('#newFieldLanding').value=$('#fieldLandingFilter').value;renderFields();});
   $('#page-empresas .page-head .primary-btn').addEventListener('click',addCompany);
   $('#saveSettings').addEventListener('click',saveCompanySettings);
   $('#addPrice').addEventListener('click',addTariff);
