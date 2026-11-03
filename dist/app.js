@@ -6,7 +6,7 @@ const $$ = (s, root=document) => [...root.querySelectorAll(s)];
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = value => Number(value || 0).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
 const categoryFor = device => /aire acondicionado|aerotermia|bomba de calor|acs|caldera|calentador|termo/i.test(String(device||'')) ? 'Clima' : (device ? 'Gama blanca' : null);
-let user=null, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, noticeSource='landing', fieldScope='phone';
+let user=null, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, noticeSource='landing', fieldScope='phone', noticeView='table';
 let fieldEditorRows=[];
 let authMode='login', selectedDate=new Date().toISOString().slice(0,10);
 const defaultFields=[
@@ -209,6 +209,7 @@ function landingName(id) { return landings.find(l=>l.id===id)?.name||'Entrada ma
 function landingOptions(selected='') { return '<option value="">Sin landing</option>'+landings.filter(l=>l.is_active).map(l=>`<option value="${l.id}" ${selected===l.id?'selected':''}>${esc(l.name)}</option>`).join(''); }
 function renderLandingOptions() {
   const filters=$('#landingFilter');if(filters)filters.innerHTML='<option value="all">Todas las landings</option>'+landings.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');
+  const reportFilter=$('#reportLanding');if(reportFilter){const selected=reportFilter.value||'all';reportFilter.innerHTML='<option value="all">Todas las landings</option>'+landings.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');reportFilter.value=selected;}
   const landingChoices='<option value="">Todas las landings</option>'+landings.filter(l=>l.is_active).map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');
   const fieldLanding=$('#newFieldLanding');if(fieldLanding){const chosen=fieldLanding.value;fieldLanding.innerHTML=landingChoices;fieldLanding.value=chosen;}
   const fieldFilter=$('#fieldLandingFilter');if(fieldFilter){const chosen=fieldFilter.value;fieldFilter.innerHTML='<option value="">Campos generales (todas las landings)</option>'+landings.filter(l=>l.is_active).map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');fieldFilter.value=chosen;}
@@ -220,12 +221,12 @@ function getUnitPrice(n) {
   const t=tariffs.find(x=>x.landing_id===n.landing_id&&x.category===n.category);return 0;
 }
 function inDatePeriod(date, period, exact, from, to) {
-  const today=new Date().toISOString().slice(0,10);
+  const today=dateOnly(new Date().toISOString());
   if(period==='today')return date===today;
-  if(period==='yesterday'){const d=new Date(today+'T12:00:00');d.setDate(d.getDate()-1);return date===d.toISOString().slice(0,10);}
+  if(period==='yesterday'){const d=new Date(today+'T12:00:00');d.setDate(d.getDate()-1);return date===dateOnly(d.toISOString());}
   if(period==='date')return !exact||date===exact;
   if(period==='range')return (!from||date>=from)&&(!to||date<=to);
-  if(period==='week'){const d=new Date(today+'T12:00:00');d.setDate(d.getDate()-(d.getDay()+6)%7);return date>=d.toISOString().slice(0,10)&&date<=today;}
+  if(period==='week'){const d=new Date(today+'T12:00:00');d.setDate(d.getDate()-(d.getDay()+6)%7);return date>=dateOnly(d.toISOString())&&date<=today;}
   if(period==='month')return date.slice(0,7)===today.slice(0,7);
   const cutoff=new Date(today+'T12:00:00');cutoff.setDate(cutoff.getDate()-29);return date>=cutoff.toISOString().slice(0,10)&&date<=today;
 }
@@ -235,8 +236,8 @@ function filteredNotices(report=false) {
   const from=$('#'+(report?'reportDateFrom':'dateFrom')).value;
   const to=$('#'+(report?'reportDateTo':'dateTo')).value;
   const weekday=$('#'+(report?'reportWeekday':'weekdayFilter'))?.value||'all';
-  const status=report?'all':$('#statusFilter').value;
-  const landing=report?'all':$('#landingFilter').value;
+  const status=$('#'+(report?'reportStatus':'statusFilter'))?.value||'all';
+  const landing=$('#'+(report?'reportLanding':'landingFilter'))?.value||'all';
   const query=(report?'':($('#tableSearch').value||$('#globalSearch').value)).toLowerCase();
   return notices.filter(n=>{
     const sourceMatch=report||((n.created_by?'phone':'landing')===noticeSource);
@@ -244,6 +245,62 @@ function filteredNotices(report=false) {
     const allText=[n.customer_name,n.phone,n.email,n.device,n.brand,n.issue,n.locality,landingName(n.landing_id),JSON.stringify(n.custom_fields||{})].join(' ').toLowerCase();
     return sourceMatch&&inDatePeriod(d,period,exact,from,to)&&(weekday==='all'||day===Number(weekday))&&(status==='all'||n.status===status)&&(landing==='all'||n.landing_id===landing)&&(!query||allText.includes(query));
   });
+}
+function noticeFieldsForCards() {
+  const landingFilter=$('#landingFilter')?.value||'all';
+  const sourceFields=noticeSource==='phone'?fieldsForPhone():(landingFilter==='all'?fields.filter(f=>f.channel==='landing'):fieldsForLanding(landingFilter));
+  const byKey=new Map();for(const f of sourceFields)if(!byKey.has(f.field_key)||f.landing_id===landingFilter)byKey.set(f.field_key,f);
+  return [...byKey.values()].sort((a,b)=>a.position-b.position);
+}
+function cardFieldsStorageKey(){return `crm-service-card-fields:${currentCompany?.id||'none'}:${noticeSource}:${$('#landingFilter')?.value||'all'}`;}
+function selectedCardFields() {
+  const available=noticeFieldsForCards(),stored=localStorage.getItem(cardFieldsStorageKey());
+  if(stored){try{return JSON.parse(stored).filter(key=>available.some(f=>f.field_key===key));}catch{}}
+  return available.filter(f=>f.visible_in_table).map(f=>f.field_key);
+}
+function renderCardFieldPanel() {
+  const panel=$('#cardFieldPanel');if(!panel)return;
+  const chosen=selectedCardFields();
+  panel.innerHTML=noticeFieldsForCards().map(f=>`<label><input type="checkbox" data-card-field="${esc(f.field_key)}" ${chosen.includes(f.field_key)?'checked':''}/> ${esc(f.label)}</label>`).join('')||'<span style="font-size:11px;color:#8993a4">No hay campos disponibles para mostrar.</span>';
+  $$('[data-card-field]',panel).forEach(input=>input.addEventListener('change',()=>{
+    const next=$$('[data-card-field]:checked',panel).map(x=>x.dataset.cardField);
+    localStorage.setItem(cardFieldsStorageKey(),JSON.stringify(next));renderKanban(filteredNotices(false));
+  }));
+}
+function setNoticeView(view) {
+  noticeView=view==='cards'?'cards':'table';
+  if(currentCompany)localStorage.setItem(`crm-service-notice-view:${currentCompany.id}:${noticeSource}`,noticeView);
+  $('#noticeTableView').hidden=noticeView!=='table';$('#kanbanBoard').hidden=noticeView!=='cards';
+  $$('[data-notice-view]').forEach(button=>button.classList.toggle('active',button.dataset.noticeView===noticeView));
+  renderKanban(filteredNotices(false));
+}
+function renderKanban(rows) {
+  const board=$('#kanbanBoard');if(!board)return;
+  const labels={Nuevo:'Avisos nuevos',Sale:'Aviso Sacado', 'No sale':'Aviso Nulo'};
+  const chosen=selectedCardFields(),available=noticeFieldsForCards().filter(f=>chosen.includes(f.field_key)&&f.field_key!=='customer_name');
+  board.innerHTML=['Nuevo','Sale','No sale'].map(status=>{
+    const cards=rows.filter(n=>(n.status||'Nuevo')===status).map(n=>{
+      const customer=n.customer_name||'Sin nombre';
+      const details=available.map(f=>{
+        const value=n.custom_fields?.[f.field_key]??n[f.field_key]??'';
+        return value!==''&&value!==null&&value!==undefined?`<span><b>${esc(f.label)}:</b> ${esc(value)}</span>`:'';
+      }).filter(Boolean).join('');
+      const origin=n.created_by?'Teléfono':landingName(n.landing_id);
+      return `<article class="notice-card" draggable="true" data-card-id="${esc(n.id)}"><div class="notice-card-head"><div><strong>${esc(customer)}</strong><small>${esc(n.phone||'Sin teléfono')}</small></div><button type="button" class="row-action" data-open-card="${esc(n.id)}" aria-label="Ver aviso">···</button></div><div class="notice-card-fields">${details}<span><b>Origen:</b> ${esc(origin)}</span><span><b>Recibido:</b> ${esc(formatDate(n.received_at))}</span></div><div class="notice-card-foot"><select data-card-status="${esc(n.id)}" aria-label="Cambiar estado del aviso">${['Nuevo','Sale','No sale'].map(s=>`<option value="${s}" ${s===status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select>${status==='Sale'&&!n.created_by?`<small>${money(getUnitPrice(n))}</small>`:''}</div></article>`;
+    }).join('');
+    return `<section class="kanban-column" data-drop-status="${status}"><div class="kanban-column-head"><span>${labels[status]}</span><span class="kanban-count">${rows.filter(n=>(n.status||'Nuevo')===status).length}</span></div><div class="kanban-list">${cards||'<div class="empty" style="padding:22px 8px;font-size:10px">Arrastra un aviso aquí</div>'}</div></section>`;
+  }).join('');
+  $$('[data-card-id]',board).forEach(card=>{
+    card.addEventListener('dragstart',event=>{event.dataTransfer.setData('text/plain',card.dataset.cardId);event.dataTransfer.effectAllowed='move';card.classList.add('dragging');});
+    card.addEventListener('dragend',()=>card.classList.remove('dragging'));
+  });
+  $$('.kanban-column',board).forEach(column=>{
+    column.addEventListener('dragover',event=>{event.preventDefault();column.classList.add('drag-over');});
+    column.addEventListener('dragleave',event=>{if(!column.contains(event.relatedTarget))column.classList.remove('drag-over');});
+    column.addEventListener('drop',async event=>{event.preventDefault();column.classList.remove('drag-over');const id=event.dataTransfer.getData('text/plain');if(id)await changeStatus(id,column.dataset.dropStatus);});
+  });
+  $$('[data-card-status]',board).forEach(select=>select.addEventListener('change',event=>changeStatus(event.target.dataset.cardStatus,event.target.value)));
+  $$('[data-open-card]',board).forEach(button=>button.addEventListener('click',()=>showDetails(button.dataset.openCard)));
 }
 function renderRows() {
   const body=$('#noticeRows');if(!body)return;
@@ -266,6 +323,7 @@ function renderRows() {
   }).join('');
   $('#emptyState').hidden=rows.length>0;
   $('#rowCount').textContent=`Mostrando ${rows.length} de ${notices.length} avisos`;
+  renderCardFieldPanel();renderKanban(rows);
   const fresh=rows.filter(n=>n.status==='Nuevo').length,sold=rows.filter(n=>n.status==='Sale').length,lost=rows.filter(n=>n.status==='No sale').length,total=rows.length,managed=sold+lost;
   $('#mTotal').textContent=total;$('#mNew').textContent=fresh;$('#mSold').textContent=sold;$('#mLost').textContent=lost;
   $('#mConversion').textContent=`${managed?Math.round(sold/managed*100):0} %`;$('#mLostPercent').textContent=`${total?Math.round(lost/total*100):0} % de avisos recibidos`;
@@ -502,6 +560,7 @@ function showPage(name) {
   $('#breadcrumb').textContent='Panel / '+labels[name];
   if(pageName==='avisos'){
     noticeSource=name==='avisos-phone'?'phone':'landing';
+    setNoticeView(localStorage.getItem(`crm-service-notice-view:${currentCompany?.id}:${noticeSource}`)||'table');
     const phone=noticeSource==='phone';
     $('#page-avisos h1').textContent=phone?'Avisos por teléfono':'Avisos por formulario';
     $('#page-avisos .page-head p').textContent=phone?'Registra y gestiona los avisos que recibes por llamada telefónica.':'Solicitudes recibidas desde formularios web.';
@@ -516,7 +575,9 @@ function wireUI() {
   setupDate('main');setupDate('report');
   ['tableSearch','globalSearch'].forEach(id=>$('#'+id).addEventListener('input',renderRows));
   ['statusFilter','landingFilter','weekdayFilter'].forEach(id=>$('#'+id).addEventListener('change',renderRows));
-  $('#reportWeekday').addEventListener('change',renderReport);
+  ['reportWeekday','reportLanding','reportStatus'].forEach(id=>$('#'+id).addEventListener('change',renderReport));
+  $$('[data-notice-view]').forEach(button=>button.addEventListener('click',()=>setNoticeView(button.dataset.noticeView)));
+  $('#cardFieldsToggle').addEventListener('click',()=>{$('#cardFieldPanel').hidden=!$('#cardFieldPanel').hidden;});
   $('#newNotice').addEventListener('click',()=>{syncDefaultFields();renderExtraFields();$('#modal').classList.add('open');$('#fName').focus();});
   $('#closeModal').addEventListener('click',()=>$('#modal').classList.remove('open'));
   $('#cancelModal').addEventListener('click',()=>$('#modal').classList.remove('open'));
