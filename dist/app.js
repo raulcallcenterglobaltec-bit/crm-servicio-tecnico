@@ -359,7 +359,7 @@ function renderComplaints() {
   const rows=notices.filter(n=>n.notice_type==='reclamacion'||n.notice_type==='anulacion').sort((a,b)=>new Date(b.received_at)-new Date(a.received_at));
   $('#complaintCount').textContent=`${rows.length} ${rows.length===1?'registro':'registros'}`;
   $('#complaintEmpty').hidden=rows.length>0;
-  body.innerHTML=rows.map(n=>`<tr><td>${esc(formatDate(n.received_at))}</td><td><div class="client-cell"><span class="client-initial">${esc((n.customer_name||'??').slice(0,2).toUpperCase())}</span><div><strong>${esc(n.customer_name||'Sin nombre')}</strong><small>${esc(n.locality||'')}</small></div></div></td><td>${esc(n.phone||'—')}</td><td><span class="source">${n.notice_type==='anulacion'?'Anulación':'Reclamación'}</span></td><td class="complaint-detail">${esc(n.issue||'—')}</td><td><button class="row-action" data-complaint-detail="${esc(n.id)}" aria-label="Ver datos">···</button></td></tr>`).join('');
+  body.innerHTML=rows.map(n=>`<tr><td>${esc(formatDate(n.received_at))}</td><td><div class="client-cell"><span class="client-initial">${esc((n.customer_name||'??').slice(0,2).toUpperCase())}</span><div><strong>${esc(n.customer_name||'Sin nombre')}</strong><small>${esc(n.locality||'')}</small></div></div></td><td>${esc(n.phone||'—')}</td><td><span class="source">${n.notice_type==='anulacion'?'Anulación':'Reclamación'}</span></td><td class="complaint-detail">${esc(n.issue||'—')}</td><td>${n.status==='Sale'?'Envío solicitado':n.status==='No sale'?'No es nuestra (cliente equivocado)':'Registro anterior'}</td><td><button class="row-action" data-complaint-detail="${esc(n.id)}" aria-label="Ver datos">···</button></td></tr>`).join('');
   $$('[data-complaint-detail]',body).forEach(button=>button.onclick=()=>showDetails(button.dataset.complaintDetail));
 }
 async function changeStatus(id,status) {
@@ -387,7 +387,8 @@ function showDetails(id) {
   const custom=Object.entries(n.custom_fields||{}).map(([k,v])=>`${fields.find(f=>f.field_key===k)?.label||k}: ${v}`).join('\n');
   const sourceLabel=n.created_by?'Teléfono':landingName(n.landing_id);
   const typeLabel=n.notice_type==='anulacion'?'Anulación':n.notice_type==='reclamacion'?'Reclamación':'Aviso técnico';
-  infoDialog('Detalle del registro',`Tipo: ${typeLabel}\nCliente: ${n.customer_name}\nTeléfono: ${n.phone}\nCorreo: ${n.email||'—'}\nAparato: ${n.device||'—'}\nOrigen: ${sourceLabel}\nEstado: ${statusLabel(n.status)}\nRecibido: ${formatDate(n.received_at)}\nLocalidad: ${n.locality||'—'}\nCódigo postal: ${n.postal_code||'—'}\nMarca: ${n.brand||'—'}\nDetalle: ${n.issue||'—'}\n${custom}`);
+  const resultLabel=n.notice_type==='aviso'?statusLabel(n.status):n.status==='Sale'?'Envío solicitado':n.status==='No sale'?'No es nuestra (cliente equivocado)':'Registro anterior';
+  infoDialog('Detalle del registro',`Tipo: ${typeLabel}\nCliente: ${n.customer_name}\nTeléfono: ${n.phone}\nCorreo: ${n.email||'—'}\nAparato: ${n.device||'—'}\nOrigen: ${sourceLabel}\nResultado: ${resultLabel}\nRecibido: ${formatDate(n.received_at)}\nLocalidad: ${n.locality||'—'}\nCódigo postal: ${n.postal_code||'—'}\nMarca: ${n.brand||'—'}\nDetalle: ${n.issue||'—'}\n${custom}`);
 }
 function setupDate(prefix) {
   const report=prefix==='report', select=$('#'+(report?'reportPeriod':'period'));
@@ -474,7 +475,10 @@ function syncDefaultFields() {
 function updateRecordFormMode() {
   const type=$('#fRecordType')?.value||'aviso',nonNotice=type!=='aviso';
   $('#recordTypeWrap').hidden=noticeSource!=='phone';
-  $('#statusFieldWrap').hidden=nonNotice;
+  $('#statusFieldWrap').hidden=noticeSource!=='phone';
+  const status=$('#fStatus'),statusLabel=$('#fStatusLabel');
+  if(status&&statusLabel&&nonNotice){const previous=status.value;statusLabel.textContent='Resultado de la llamada';status.innerHTML='<option value="Sale">Enviar reclamación o anulación</option><option value="No sale">No es nuestra (cliente equivocado)</option>';status.value=previous==='No sale'?'No sale':'Sale';}
+  else if(status&&statusLabel){statusLabel.textContent='Resultado del aviso';status.innerHTML='<option value="Nuevo">Pendiente</option><option value="Sale">Aviso Sacado</option><option value="No sale">Aviso Nulo</option>';status.value='Nuevo';}
   const deviceField=$('[data-field-code="device"]'),brandField=$('[data-field-code="brand"]'),issueField=$('[data-field-code="issue"]');
   if(deviceField&&nonNotice)deviceField.hidden=true;
   if(brandField&&nonNotice)brandField.hidden=true;
@@ -499,12 +503,13 @@ async function createNotice(event) {
   const type=$('#fRecordType').value||'aviso',isPhoneNotice=type==='aviso',device=isPhoneNotice?v('fDevice'):'';const custom_fields={};
   $$('[data-custom-key]', $('#noticeForm')).forEach(el=>{const c=$('input,select,textarea',el);custom_fields[el.dataset.customKey]=c.type==='checkbox'?c.checked:c.value;});
   const category=categoryFor(device);
-  const row={company_id:currentCompany.id,landing_id:null,notice_type:type,status:isPhoneNotice?(v('fStatus')||'Nuevo'):'Nuevo',customer_name:v('fName'),phone:v('fPhone'),email:$('#fEmail')?.value?.trim()||null,locality:v('fLocality')||null,postal_code:v('fPostal')||null,device:device||null,category:isPhoneNotice?category:null,brand:isPhoneNotice?(v('fBrand')||null):null,issue:v('fIssue')||null,custom_fields,unit_price:0,created_by:user.id};
+  const row={company_id:currentCompany.id,landing_id:null,notice_type:type,status:v('fStatus')||'Nuevo',customer_name:v('fName'),phone:v('fPhone'),email:$('#fEmail')?.value?.trim()||null,locality:v('fLocality')||null,postal_code:v('fPostal')||null,device:device||null,category:isPhoneNotice?category:null,brand:isPhoneNotice?(v('fBrand')||null):null,issue:v('fIssue')||null,custom_fields,unit_price:0,created_by:user.id};
   const {data,error}=await db.from('notices').insert(row).select().single();
   if(error){submitButtons.forEach(button=>button.disabled=false);toast(errorText(error),'No se pudo guardar el aviso');return;}
   submitButtons.forEach(button=>button.disabled=false);
   notices.unshift(data);$('#modal').classList.remove('open');event.target.reset();renderRows();renderComplaints();
-  if(type!=='aviso')await sendNoticeToConfiguredIntegrations(data);
+  if(type!=='aviso'&&data.status==='Sale')await sendNoticeToConfiguredIntegrations(data);
+  else if(type!=='aviso')toast('Se ha guardado sin enviar: cliente equivocado o llamada ajena a la empresa.','Registro guardado');
   else if(data.status==='Sale')await sendNoticeToConfiguredIntegrations(data);
   else toast(`Teléfono · ${data.device||'Aviso'} · ${formatDate(data.received_at)}`,'Aviso guardado en el CRM');
 }
