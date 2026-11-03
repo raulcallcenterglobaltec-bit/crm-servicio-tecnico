@@ -131,7 +131,11 @@ async function loadMemberships() {
   const {data:rows,error:companyError}=isSuperAdmin?await companyQuery:await companyQuery.in('id',ids);
   if(companyError)throw companyError;
   companies=rows||[];
-  if(!companies.length){showOnboarding();return;}
+  if(!companies.length){
+    currentCompany=null;
+    if(!isSuperAdmin){showOnboarding();return;}
+    $('#authScreen')?.remove();mountSignOut();renderCompanyPicker();renderCompanyPage();showPage('empresas');return;
+  }
   currentCompany=companies.find(c=>c.id===currentCompany?.id)||companies[0];
   $('#authScreen')?.remove();
   mountSignOut(); renderCompanyPicker(); renderCompanyPage(); renderMembers(); renderIntegrations(); renderSettings(); await loadCompanyData();
@@ -168,6 +172,7 @@ function applyCompanyTheme(color) {
 function renderCompanyPicker() {
   const old=$('.company-select');if(!old)return;
   if(!isSuperAdmin){old.hidden=true;const separator=$('.top-sep');if(separator)separator.hidden=true;return;}
+  if(!currentCompany){old.innerHTML='<span class="company-badge">+</span><span>Sin empresas</span>';return;}
   const select=document.createElement('label');select.className='company-select';
   select.innerHTML=`<span class="company-badge">${esc((currentCompany.name||'GT').slice(0,2).toUpperCase())}</span><select id="companySwitch" aria-label="Empresa"></select>`;
   old.replaceWith(select);
@@ -578,10 +583,9 @@ function renderCompanyPage() {
   if(!isSuperAdmin)return;
   const section=$('#page-empresas');if(!section)return;
   let grid=$('.simple-grid',section);if(!grid)return;
-  grid.innerHTML=companies.map(c=>'<div class="placeholder-tile" style="display:flex;align-items:center;justify-content:space-between;gap:12px"><button type="button" data-company-card="'+c.id+'" style="flex:1;text-align:left;border:0;background:transparent;color:inherit;padding:0;cursor:pointer"><span class="company-badge">'+esc(c.name.slice(0,2).toUpperCase())+'</span><strong>'+esc(c.name)+'</strong><small>'+(c.id===currentCompany?.id?'Empresa actual':'Cambiar a esta empresa')+'</small></button><button type="button" class="mini-delete" data-delete-company="'+c.id+'" aria-label="Eliminar empresa '+esc(c.name)+'" title="Eliminar empresa" '+(companies.length<=1?'disabled':'')+'>×</button></div>').join('')||'<div class="empty">Crea tu primera empresa.</div>';
+  grid.innerHTML=companies.map(c=>'<div class="placeholder-tile" style="display:flex;align-items:center;justify-content:space-between;gap:12px"><button type="button" data-company-card="'+c.id+'" style="flex:1;text-align:left;border:0;background:transparent;color:inherit;padding:0;cursor:pointer"><span class="company-badge">'+esc(c.name.slice(0,2).toUpperCase())+'</span><strong>'+esc(c.name)+'</strong><small>'+(c.id===currentCompany?.id?'Empresa actual':'Cambiar a esta empresa')+'</small></button><button type="button" class="mini-delete" data-delete-company="'+c.id+'" aria-label="Eliminar empresa '+esc(c.name)+'" title="Eliminar empresa" ' >×</button></div>').join('')||'<div class="empty">Crea tu primera empresa.</div>';
   $('[data-company-card]',grid).forEach(b=>b.onclick=()=>{currentCompany=companies.find(c=>c.id===b.dataset.companyCard);renderCompanyPicker();loadCompanyData();});
   $('[data-delete-company]',grid).forEach(b=>b.onclick=async()=>{
-    if(companies.length<=1){toast('Debe quedar al menos una empresa.','No se puede eliminar');return;}
     const company=companies.find(c=>c.id===b.dataset.deleteCompany);if(!company)return;
     const confirmed=await confirmDialog(`¿Eliminar la empresa «${company.name}»? Se borrarán definitivamente sus avisos, landings, campos, tarifas, usuarios e integraciones. Esta acción no se puede deshacer.`);
     if(!confirmed)return;
