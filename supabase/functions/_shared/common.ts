@@ -68,20 +68,26 @@ function htmlEscape(text: string) {
   return text.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!))
 }
 
-export async function sendNoticeNotifications(admin: SupabaseClient, companyId: string, notice: Record<string,any>, landingName: string, test = false, onlyKind?: string) {
+export async function sendNoticeNotifications(admin: SupabaseClient, companyId: string, notice: Record<string,any>, landingName: string, test = false, onlyKind?: string, eventType: 'form' | 'phone' | 'complaint' = 'form') {
   const { data, error } = await admin.from('company_integrations').select('kind,enabled,encrypted_config').eq('company_id', companyId).eq('enabled', true)
   if (error) throw error
   const results: { kind: string; ok: boolean; error?: string }[] = []
   for (const item of (data || []).filter(x => !onlyKind || x.kind === onlyKind)) {
     try {
       const config = await decryptConfig(item.encrypted_config)
+      if (!test && config.routes && (!Array.isArray(config.routes[eventType]) || !config.routes[eventType].includes(item.kind))) continue
       const time = new Date().toLocaleString('es-ES',{timeZone:'Europe/Madrid',dateStyle:'short',timeStyle:'short'})
-      const title = test ? 'Prueba de CRM Servicio Técnico' : 'Nuevo aviso recibido'
-      const message = test ? 'La conexión de notificaciones está funcionando.' : `${title}\nLanding: ${landingName}\nHora: ${time}\nCliente: ${notice.customer_name || '—'}\nTeléfono: ${notice.phone || '—'}\nAparato: ${notice.device || '—'}\nAvería: ${notice.issue || '—'}`
+      const isCancellation = notice.notice_type === 'anulacion'
+      const isComplaint = eventType === 'complaint'
+      const title = test ? 'Prueba de CRM Servicio Técnico' : isCancellation ? 'Nueva anulación telefónica' : isComplaint ? 'Nueva reclamación telefónica' : 'Nuevo aviso recibido'
+      const originLabel = isComplaint ? 'Origen: Teléfono' : eventType === 'form' ? `Landing: ${landingName}` : 'Origen: Teléfono'
+      const message = test ? 'La conexión de notificaciones está funcionando.' : `${title}\n${originLabel}\nHora: ${time}\nCliente: ${notice.customer_name || '—'}\nTeléfono: ${notice.phone || '—'}${eventType === 'form' ? `\nAparato: ${notice.device || '—'}\nAvería: ${notice.issue || '—'}` : `\nDetalle: ${notice.issue || '—'}`}`
       if (item.kind === 'telegram') {
+        const telegramChat = isComplaint ? config.complaint_chat_id : config.chat_id
+        if (isComplaint && !telegramChat) throw new Error('Configura el chat de Telegram para reclamaciones o anulaciones.')
         const response = await fetch(`https://api.telegram.org/bot${config.bot_token}/sendMessage`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: config.chat_id, text: message }),
+          body: JSON.stringify({ chat_id: telegramChat || config.chat_id, text: message }),
         })
         if (!response.ok) throw new Error(`Telegram respondió ${response.status}`)
       } else if (item.kind === 'email') {
@@ -94,7 +100,7 @@ export async function sendNoticeNotifications(admin: SupabaseClient, companyId: 
       } else if (item.kind === 'whatsapp') {
         const params = test
           ? ['CRM Servicio Técnico','Prueba', 'CRM Servicio Técnico', '34600000000', 'Aviso de prueba']
-          : [landingName, time, notice.customer_name || '—', notice.phone || '—', notice.device || '—']
+          : [eventType === 'form' ? landingName : (isCancellation ? 'Anulación telefónica' : isComplaint ? 'Reclamación telefónica' : 'Aviso telefónico'), time, notice.customer_name || '—', notice.phone || '—', eventType === 'form' ? (notice.device || '—') : (notice.issue || '—')]
         const response = await fetch(`https://graph.facebook.com/v26.0/${encodeURIComponent(config.phone_number_id)}/messages`, {
           method: 'POST', headers: { Authorization: `Bearer ${config.access_token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: String(config.to).replace(/\D/g, ''), type: 'template', template: { name: config.template_name, language: { code: config.language || 'es' }, components: [{ type: 'body', parameters: params.map(text => ({ type: 'text', text: String(text) })) }] } }),

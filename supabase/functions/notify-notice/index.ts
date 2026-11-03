@@ -13,8 +13,9 @@ Deno.serve(async (req) => {
     if (!notice) return json({ error: 'Aviso no encontrado.' }, 404)
     const { data: membership } = await admin.from('company_members').select('user_id').eq('company_id', notice.company_id).eq('user_id', user.id).maybeSingle()
     if (!membership) return json({ error: 'No tienes acceso a esta empresa.' }, 403)
-    const source = notice.created_by ? 'Aviso por teléfono' : (notice.landings?.name || 'Entrada manual')
-    const results = await sendNoticeNotifications(admin, notice.company_id, notice, source)
+    const eventType = notice.notice_type === 'aviso' ? (notice.created_by ? 'phone' : 'form') : 'complaint'
+    const source = eventType === 'complaint' ? 'Teléfono · Reclamación o anulación' : (notice.created_by ? 'Aviso por teléfono' : (notice.landings?.name || 'Entrada manual'))
+    const results = await sendNoticeNotifications(admin, notice.company_id, notice, source, false, undefined, eventType)
     return json({ ok: true, results })
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : 'No se pudo enviar el aviso.' }, 400)

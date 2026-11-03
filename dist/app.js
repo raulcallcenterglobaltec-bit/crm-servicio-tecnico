@@ -31,13 +31,14 @@ function formDialog({title,description='',fields=[],confirmText='Guardar'}) {
       let control;
       if(f.type==='select')control=`<select name="${key}" ${required}>${(f.options||[]).map(o=>{const v=typeof o==='string'?o:o.value,l=typeof o==='string'?o:o.label;return `<option value="${esc(v)}" ${String(v)===String(f.value??'')?'selected':''}>${esc(l)}</option>`;}).join('')}</select>`;
       else if(f.type==='textarea')control=`<textarea name="${key}" rows="3" ${required} placeholder="${esc(f.placeholder||'')}">${value}</textarea>`;
+      else if(f.type==='checkbox')control=`<input name="${key}" type="checkbox" ${f.value?'checked':''} ${required}/>`;
       else control=`<input name="${key}" type="${esc(f.type||'text')}" value="${value}" ${required} placeholder="${esc(f.placeholder||'')}" ${f.autocomplete?`autocomplete="${esc(f.autocomplete)}"`:''}/>`;
       return `<label class="field" style="margin:12px 0"><span>${label}</span>${control}</label>`;
     }).join('');
     backdrop.innerHTML=`<form class="modal" style="max-height:90vh;overflow:auto" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>${esc(title)}</h2><p>${esc(description)}</p></div><button class="close" type="button" data-dialog-cancel aria-label="Cerrar">×</button></div>${controls}<div class="modal-actions"><button class="outline-btn" type="button" data-dialog-cancel>Cancelar</button><button class="primary-btn" type="submit">${esc(confirmText)}</button></div></form>`;
     const finish=value=>{backdrop.remove();resolve(value);};
     backdrop.addEventListener('click',e=>{if(e.target===backdrop||e.target.closest('[data-dialog-cancel]'))finish(null);});
-    $('form',backdrop).addEventListener('submit',e=>{e.preventDefault();const result={};for(const f of fields){const el=$('[name="'+CSS.escape(f.key)+'"]',backdrop);result[f.key]=f.type==='number'?Number(el.value):el.value;}finish(result);});
+    $('form',backdrop).addEventListener('submit',e=>{e.preventDefault();const result={};for(const f of fields){const el=$('[name="'+CSS.escape(f.key)+'"]',backdrop);result[f.key]=f.type==='checkbox'?el.checked:f.type==='number'?Number(el.value):el.value;}finish(result);});
     document.body.append(backdrop);$('[name]',backdrop)?.focus();
   });
 }
@@ -148,6 +149,7 @@ function applyAccessPermissions() {
   const current=members.find(m=>m.user_id===user?.id);
   $$('[data-page]').forEach(button=>{if(['empresas','usuarios','configuracion','integraciones'].includes(button.dataset.page))button.hidden=!isSuperAdmin;});
   const createButton=$('#newNotice');if(createButton)createButton.hidden=!isSuperAdmin&&current?.role==='consulta';
+  const createComplaint=$('#newComplaint');if(createComplaint)createComplaint.hidden=!isSuperAdmin&&current?.role==='consulta';
 }
 function mixColor(hex,target,weight) {
   const from=hex.match(/[\da-f]{2}/ig)||['52','67','e8'],to=target.match(/[\da-f]{2}/ig)||['ff','ff','ff'];
@@ -198,12 +200,12 @@ async function loadCompanyData() {
     if(!realtimeChannel){realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();}}).subscribe();}
     else {await db.removeChannel(realtimeChannel);realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();}}).subscribe();}
     $$('.demo-banner').forEach(el=>el.remove());setConnectionError('');
-    renderLandingOptions();renderRows();renderReport();renderFields();renderPriceRules();renderCompanyPage();renderMembers();renderIntegrations();renderSettings();
+    renderLandingOptions();renderRows();renderReport();renderComplaints();renderFields();renderPriceRules();renderCompanyPage();renderMembers();renderIntegrations();renderSettings();
     mountSignOut();
   } catch(error) {
     landings=[];notices=[];tariffs=[];fields=[];
     $$('.demo-banner').forEach(el=>el.remove());
-    renderLandingOptions();renderRows();renderReport();renderFields();renderPriceRules();renderCompanyPage();renderMembers();renderIntegrations();renderSettings();
+    renderLandingOptions();renderRows();renderReport();renderComplaints();renderFields();renderPriceRules();renderCompanyPage();renderMembers();renderIntegrations();renderSettings();
     const message='No se pudieron cargar los datos de esta empresa: '+errorText(error);
     setConnectionError(message);toast(message,'Error de conexión');
   }
@@ -243,7 +245,7 @@ function filteredNotices(report=false) {
   const landing=$('#'+(report?'reportLanding':'landingFilter'))?.value||'all';
   const query=(report?'':($('#tableSearch').value||$('#globalSearch').value)).toLowerCase();
   return notices.filter(n=>{
-    const sourceMatch=report||((n.created_by?'phone':'landing')===noticeSource);
+    const sourceMatch=n.notice_type==='aviso'&&(report||((n.created_by?'phone':'landing')===noticeSource));
     const d=dateOnly(n.received_at), day=new Date(d+'T12:00:00').getDay();
     const allText=[n.customer_name,n.phone,n.email,n.device,n.brand,n.issue,n.locality,landingName(n.landing_id),JSON.stringify(n.custom_fields||{})].join(' ').toLowerCase();
     return sourceMatch&&inDatePeriod(d,period,exact,from,to)&&(weekday==='all'||day===Number(weekday))&&(status==='all'||n.status===status)&&(landing==='all'||n.landing_id===landing)&&(!query||allText.includes(query));
@@ -335,7 +337,8 @@ function renderRows() {
     return `<tr>${cells}<td><span class="source">${esc(sourceLabel)}</span></td><td>${esc(formatDate(n.received_at))}</td><td><select class="status ${statusClass(n.status)}" data-status-id="${n.id}" aria-label="Cambiar estado" ${canManage?'':'disabled'}>${['Nuevo','Sale','No sale'].map(s=>`<option value="${esc(s)}" ${s===n.status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select></td><td>${n.status==='Sale'&&!n.created_by?money(getUnitPrice(n)):'—'}</td><td><button class="row-action" data-open-id="${n.id}" aria-label="Abrir aviso">···</button></td></tr>`;
   }).join('');
   $('#emptyState').hidden=rows.length>0;
-  $('#rowCount').textContent=`Mostrando ${rows.length} de ${notices.length} avisos`;
+  const sourceTotal=notices.filter(n=>n.notice_type==='aviso'&&(noticeSource==='phone'?!!n.created_by:!!n.landing_id)).length;
+  $('#rowCount').textContent=`Mostrando ${rows.length} de ${sourceTotal} avisos`;
   renderCardFieldPanel();renderKanban(rows);
   const fresh=rows.filter(n=>n.status==='Nuevo').length,sold=rows.filter(n=>n.status==='Sale').length,lost=rows.filter(n=>n.status==='No sale').length,total=rows.length,managed=sold+lost;
   $('#mTotal').textContent=total;$('#mNew').textContent=fresh;$('#mSold').textContent=sold;$('#mLost').textContent=lost;
@@ -351,6 +354,14 @@ function renderRows() {
   $$('[data-open-id]',body).forEach(b=>b.addEventListener('click',()=>showDetails(b.dataset.openId)));
   renderReport();
 }
+function renderComplaints() {
+  const body=$('#complaintRows');if(!body)return;
+  const rows=notices.filter(n=>n.notice_type==='reclamacion'||n.notice_type==='anulacion').sort((a,b)=>new Date(b.received_at)-new Date(a.received_at));
+  $('#complaintCount').textContent=`${rows.length} ${rows.length===1?'registro':'registros'}`;
+  $('#complaintEmpty').hidden=rows.length>0;
+  body.innerHTML=rows.map(n=>`<tr><td>${esc(formatDate(n.received_at))}</td><td><div class="client-cell"><span class="client-initial">${esc((n.customer_name||'??').slice(0,2).toUpperCase())}</span><div><strong>${esc(n.customer_name||'Sin nombre')}</strong><small>${esc(n.locality||'')}</small></div></div></td><td>${esc(n.phone||'—')}</td><td><span class="source">${n.notice_type==='anulacion'?'Anulación':'Reclamación'}</span></td><td class="complaint-detail">${esc(n.issue||'—')}</td><td><button class="row-action" data-complaint-detail="${esc(n.id)}" aria-label="Ver datos">···</button></td></tr>`).join('');
+  $$('[data-complaint-detail]',body).forEach(button=>button.onclick=()=>showDetails(button.dataset.complaintDetail));
+}
 async function changeStatus(id,status) {
   if(!canManageCurrentNotices())return;
   const n=notices.find(x=>x.id===id);if(!n)return;
@@ -360,21 +371,23 @@ async function changeStatus(id,status) {
   const {data,error}=await db.from('notices').update(patch).eq('id',id).select().single();
   if(error){toast(errorText(error),'No se pudo guardar');renderRows();return;}
   Object.assign(n,data);renderRows();
-  if(!wasSale&&status==='Sale'&&n.created_by&&!n.landing_id)await sendPhoneNoticeToConfiguredIntegrations(n);
+  if(!wasSale&&status==='Sale'&&n.created_by&&!n.landing_id&&n.notice_type==='aviso')await sendNoticeToConfiguredIntegrations(n);
 }
-async function sendPhoneNoticeToConfiguredIntegrations(notice) {
+async function sendNoticeToConfiguredIntegrations(notice) {
   const {data,error}=await db.functions.invoke('notify-notice',{body:{notice_id:notice.id}});
   if(error){toast(errorText(error),'Aviso guardado, pero no se pudo enviar');return false;}
   const results=data?.results||[],sent=results.filter(result=>result.ok).map(result=>({telegram:'Telegram',email:'correo',whatsapp:'WhatsApp'}[result.kind]||result.kind)),failed=results.filter(result=>!result.ok);
-  if(!results.length){toast('No hay integraciones activadas para esta empresa.','Aviso guardado en el CRM');return false;}
+  if(!results.length){toast('No hay canales seleccionados para este tipo de registro.','Guardado en el CRM');return false;}
   if(failed.length){const names=failed.map(result=>({telegram:'Telegram',email:'correo',whatsapp:'WhatsApp'}[result.kind]||result.kind)).join(', ');toast(sent.length?`Enviado a ${sent.join(', ')}. Falló: ${names}.`:`No se pudo enviar a ${names}.`,'Aviso guardado con incidencias');return false;}
-  toast(`${notice.customer_name||'Cliente'} · ${notice.device||'Aviso'} · ${sent.join(', ')}`,'Aviso sale adelante y se envió');return true;
+  const label=notice.notice_type==='anulacion'?'Anulación enviada':notice.notice_type==='reclamacion'?'Reclamación enviada':'Aviso telefónico enviado';
+  toast(`${notice.customer_name||'Cliente'} · ${sent.join(', ')}`,label);return true;
 }
 function showDetails(id) {
   const n=notices.find(x=>x.id===id);if(!n)return;
   const custom=Object.entries(n.custom_fields||{}).map(([k,v])=>`${fields.find(f=>f.field_key===k)?.label||k}: ${v}`).join('\n');
   const sourceLabel=n.created_by?'Teléfono':landingName(n.landing_id);
-  infoDialog('Detalle del aviso',`Cliente: ${n.customer_name}\nTeléfono: ${n.phone}\nCorreo: ${n.email||'—'}\nAparato: ${n.device||'—'}\nOrigen: ${sourceLabel}\nEstado: ${statusLabel(n.status)}\nRecibido: ${formatDate(n.received_at)}\nLocalidad: ${n.locality||'—'}\nCódigo postal: ${n.postal_code||'—'}\nMarca: ${n.brand||'—'}\nAvería: ${n.issue||'—'}\n${custom}`);
+  const typeLabel=n.notice_type==='anulacion'?'Anulación':n.notice_type==='reclamacion'?'Reclamación':'Aviso técnico';
+  infoDialog('Detalle del registro',`Tipo: ${typeLabel}\nCliente: ${n.customer_name}\nTeléfono: ${n.phone}\nCorreo: ${n.email||'—'}\nAparato: ${n.device||'—'}\nOrigen: ${sourceLabel}\nEstado: ${statusLabel(n.status)}\nRecibido: ${formatDate(n.received_at)}\nLocalidad: ${n.locality||'—'}\nCódigo postal: ${n.postal_code||'—'}\nMarca: ${n.brand||'—'}\nDetalle: ${n.issue||'—'}\n${custom}`);
 }
 function setupDate(prefix) {
   const report=prefix==='report', select=$('#'+(report?'reportPeriod':'period'));
@@ -458,20 +471,41 @@ function syncDefaultFields() {
     if(field){const label=$('label',el);if(label)label.textContent=field.label;const control=$('input,select,textarea',el);if(control){control.required=field.required;if(field.field_type==='phone'&&control.tagName==='INPUT')control.type='tel';if(field.field_type==='email'&&control.tagName==='INPUT')control.type='email';if(field.field_type==='number'&&control.tagName==='INPUT')control.type='number';if(code==='device'&&control.tagName==='SELECT'&&field.options?.length)control.innerHTML=field.options.map(v=>`<option>${esc(v)}</option>`).join('');}}
   });
 }
+function updateRecordFormMode() {
+  const type=$('#fRecordType')?.value||'aviso',nonNotice=type!=='aviso';
+  $('#recordTypeWrap').hidden=noticeSource!=='phone';
+  $('#statusFieldWrap').hidden=nonNotice;
+  const deviceField=$('[data-field-code="device"]'),brandField=$('[data-field-code="brand"]'),issueField=$('[data-field-code="issue"]');
+  if(deviceField&&nonNotice)deviceField.hidden=true;
+  if(brandField&&nonNotice)brandField.hidden=true;
+  if(issueField&&nonNotice)issueField.hidden=false;
+  const issueLabel=$('#fIssueLabel'),issue=$('#fIssue');
+  if(issueLabel)issueLabel.textContent=type==='anulacion'?'Detalle de la anulación':type==='reclamacion'?'Motivo de la reclamación':'Avería o comentario';
+  if(issue) {issue.placeholder=nonNotice?(type==='anulacion'?'Describe qué servicio, cita o solicitud se quiere anular':'Describe exactamente qué reclama el cliente'):'Describe brevemente el problema';issue.required=nonNotice;}
+  $('#modalTitle').textContent=type==='anulacion'?'Registrar anulación':type==='reclamacion'?'Registrar reclamación':'Añadir aviso';
+  $('#modalDescription').textContent=nonNotice?'Completa los datos de la persona y el detalle de la reclamación o anulación.':'Completa los datos para registrar un aviso telefónico.';
+  const submit=$('#noticeForm button[type="submit"]');if(submit)submit.textContent=type==='anulacion'?'Guardar anulación':type==='reclamacion'?'Guardar reclamación':'Guardar aviso';
+}
+function openPhoneNotice(type='aviso') {
+  noticeSource='phone';$('#noticeForm').reset();$('#fRecordType').value=type;
+  syncDefaultFields();renderExtraFields();updateRecordFormMode();
+  $('#modal').classList.add('open');$('#fName').focus();
+}
 async function createNotice(event) {
   event.preventDefault();
   const submitButtons=$$('#noticeForm button[type="submit"]');
   submitButtons.forEach(button=>button.disabled=true);
   const v=id=>$('#'+id).value.trim();
-  const device=v('fDevice'), custom_fields={};
+  const type=$('#fRecordType').value||'aviso',isPhoneNotice=type==='aviso',device=isPhoneNotice?v('fDevice'):'';const custom_fields={};
   $$('[data-custom-key]', $('#noticeForm')).forEach(el=>{const c=$('input,select,textarea',el);custom_fields[el.dataset.customKey]=c.type==='checkbox'?c.checked:c.value;});
   const category=categoryFor(device);
-  const row={company_id:currentCompany.id,landing_id:null,status:v('fStatus')||'Nuevo',customer_name:v('fName'),phone:v('fPhone'),email:$('#fEmail')?.value?.trim()||null,locality:v('fLocality')||null,postal_code:v('fPostal')||null,device:device||null,category,brand:v('fBrand')||null,issue:v('fIssue')||null,custom_fields,unit_price:0,created_by:user.id};
+  const row={company_id:currentCompany.id,landing_id:null,notice_type:type,status:isPhoneNotice?(v('fStatus')||'Nuevo'):'Nuevo',customer_name:v('fName'),phone:v('fPhone'),email:$('#fEmail')?.value?.trim()||null,locality:v('fLocality')||null,postal_code:v('fPostal')||null,device:device||null,category:isPhoneNotice?category:null,brand:isPhoneNotice?(v('fBrand')||null):null,issue:v('fIssue')||null,custom_fields,unit_price:0,created_by:user.id};
   const {data,error}=await db.from('notices').insert(row).select().single();
   if(error){submitButtons.forEach(button=>button.disabled=false);toast(errorText(error),'No se pudo guardar el aviso');return;}
   submitButtons.forEach(button=>button.disabled=false);
-  notices.unshift(data);$('#modal').classList.remove('open');event.target.reset();renderRows();
-  if(data.status==='Sale')await sendPhoneNoticeToConfiguredIntegrations(data);
+  notices.unshift(data);$('#modal').classList.remove('open');event.target.reset();renderRows();renderComplaints();
+  if(type!=='aviso')await sendNoticeToConfiguredIntegrations(data);
+  else if(data.status==='Sale')await sendNoticeToConfiguredIntegrations(data);
   else toast(`Teléfono · ${data.device||'Aviso'} · ${formatDate(data.received_at)}`,'Aviso guardado en el CRM');
 }
 function showSettingsTab(name) {
@@ -547,25 +581,34 @@ async function renderIntegrations() {
   if(!isSuperAdmin)return;
   const section=$('#page-integraciones');if(!section)return;
   const old=$('.demo-banner',section);if(old)old.remove();
-  const grid=$('.simple-grid',section);if(!grid)return;
-  grid.innerHTML=`<article class="card simple-card"><div class="metric-icon">⌘</div><h2>Formularios web</h2><p>Conecta una landing y copia su endpoint y código de envío.</p><button class="outline-btn" id="addLanding" style="margin-top:10px">＋ Añadir landing</button><div id="landingIntegrations" style="display:grid;gap:12px;margin-top:14px"></div></article><article class="card simple-card"><div class="metric-icon" style="background:#e7f4ff;color:#2685c5">➤</div><h2>Telegram</h2><p>Notifica la llegada de avisos en el chat de la empresa.</p><div class="button-row"><button class="outline-btn" id="setupTelegram">Configurar Telegram</button><button class="outline-btn" id="testTelegram">Enviar prueba</button></div></article><article class="card simple-card"><div class="metric-icon" style="background:#e7f8ef;color:#16844b">◉</div><h2>WhatsApp</h2><p>Integración opcional para avisos recibidos desde formularios. No se envía nada hasta que configures esta conexión.</p><div class="button-row"><button class="outline-btn" id="setupWhatsapp">Configurar WhatsApp</button><button class="outline-btn" id="testWhatsapp">Enviar prueba</button></div></article><article class="card simple-card"><div class="metric-icon amber">✉</div><h2>Correo electrónico</h2><p>Envía avisos a las direcciones que elijas mediante Resend.</p><div class="button-row"><button class="outline-btn" id="setupEmail">Configurar correo</button><button class="outline-btn" id="testEmail">Enviar prueba</button></div></article>`;
   $('#addLanding').onclick=async()=>{const answer=await formDialog({title:'Añadir landing',description:'Conecta un formulario web a esta empresa.',fields:[{key:'name',label:'Nombre de la landing',required:true},{key:'url',label:'URL de la landing',placeholder:'https://ejemplo.com'},{key:'domains',label:'Orígenes permitidos (separados por comas)',placeholder:'https://ejemplo.com'}]});if(!answer?.name.trim())return;const name=answer.name,url=answer.url.trim()||null,domains=answer.domains||'';const allowed_origins=domains.split(',').map(x=>x.trim()).filter(Boolean);const {data,error}=await db.from('landings').insert({company_id:currentCompany.id,name:name.trim(),url,allowed_origins}).select().single();if(error){toast(errorText(error),'No se pudo crear la landing');return;}landings.push(data);landings.sort((a,b)=>a.name.localeCompare(b.name));await loadCompanyData();showLandingCode(data);};
-  $('#setupTelegram').onclick=()=>configureIntegration('telegram');
-  $('#setupEmail').onclick=()=>configureIntegration('email');
-  $('#setupWhatsapp').onclick=()=>configureIntegration('whatsapp');
-  $('#testTelegram').onclick=()=>testIntegration('telegram');$('#testEmail').onclick=()=>testIntegration('email');$('#testWhatsapp').onclick=()=>testIntegration('whatsapp');
+  $('#providerCards').innerHTML=`<article class="provider-card"><h4>Telegram</h4><p>Avisos normales y un grupo distinto para reclamaciones o anulaciones.</p><div class="button-row"><button class="outline-btn" data-config-channel="telegram">Configurar Telegram</button><button class="outline-btn" data-test-channel="telegram">Enviar prueba</button></div></article><article class="provider-card"><h4>WhatsApp</h4><p>Elige arriba qué avisos quieres recibir por WhatsApp.</p><div class="button-row"><button class="outline-btn" data-config-channel="whatsapp">Configurar WhatsApp</button><button class="outline-btn" data-test-channel="whatsapp">Enviar prueba</button></div></article><article class="provider-card"><h4>Correo electrónico</h4><p>Envía los tipos de aviso seleccionados a los correos configurados.</p><div class="button-row"><button class="outline-btn" data-config-channel="email">Configurar correo</button><button class="outline-btn" data-test-channel="email">Enviar prueba</button></div></article>`;
+  $$('[data-config-channel]',$('#providerCards')).forEach(b=>b.onclick=()=>configureIntegration(b.dataset.configChannel));
+  $$('[data-test-channel]',$('#providerCards')).forEach(b=>b.onclick=()=>testIntegration(b.dataset.testChannel));
+  await renderNotificationRoutes();
   const host=$('#landingIntegrations');
   host.innerHTML=landings.map(l=>`<div class="placeholder-tile"><strong>${esc(l.name)}${l.is_active?'':' · Inactiva'}</strong><small>${esc(l.url||'Sin URL guardada')}</small><div class="button-row"><button class="outline-btn" data-code="${l.id}">Ver conexión</button><button class="mini-delete" data-delete-landing="${l.id}" aria-label="Desactivar landing">×</button></div></div>`).join('')||'<div class="empty">Todavía no hay landings conectadas.</div>';
   $$('[data-code]',host).forEach(b=>b.onclick=()=>showLandingCode(landings.find(l=>l.id===b.dataset.code)));
   $$('[data-delete-landing]',host).forEach(b=>b.onclick=async()=>{if(!await confirmDialog('¿Desactivar esta landing? Sus avisos y tarifas históricas se conservarán.'))return;const {error}=await db.from('landings').update({is_active:false}).eq('id',b.dataset.deleteLanding);if(error)toast(errorText(error),'No se pudo desactivar');else await loadCompanyData();});
 }
+async function renderNotificationRoutes() {
+  const host=$('#notificationRoutes');if(!host)return;
+  host.innerHTML='<div class="empty" style="padding:16px">Cargando destinos…</div>';
+  const {data,error}=await db.functions.invoke('manage-integration',{body:{company_id:currentCompany.id,action:'get_routes'}});
+  if(error){host.innerHTML=`<div class="empty">No se pudieron cargar los destinos: ${esc(errorText(error))}</div>`;return;}
+  const channels=data?.channels||[],routes=data?.routes||{form:[],phone:[],complaint:[]},blocked=data?.blocked||{form:[],phone:[],complaint:[]};
+  const rows=[['form','Avisos recibidos por formulario web'],['phone','Avisos telefónicos marcados «Aviso Sacado»'],['complaint','Reclamaciones o anulaciones']];
+  host.innerHTML=`<table class="route-table"><thead><tr><th>TIPO DE AVISO</th><th>TELEGRAM</th><th>WHATSAPP</th><th>CORREO</th></tr></thead><tbody>${rows.map(([type,label])=>`<tr><td>${label}</td>${[['telegram','Telegram'],['whatsapp','WhatsApp'],['email','Correo']].map(([channel])=>{const unavailable=blocked[type]?.includes(channel);return `<td><input type="checkbox" aria-label="Enviar ${label} por ${channel}" data-route-type="${type}" data-route-channel="${channel}" ${routes[type]?.includes(channel)?'checked':''} ${channels.includes(channel)&&!unavailable?'':'disabled'} ${unavailable?'title="Configura un grupo de Telegram distinto para este destino"':''} /></td>`;}).join('')}</tr>`).join('')}</tbody></table>`;
+  const hint=$('#routeSaveHint');if(hint)hint.textContent=blocked.complaint?.includes('telegram')?'Para activar Telegram aquí, vuelve a configurarlo con el ID del grupo distinto para reclamaciones o anulaciones.':channels.length?'Marca los destinos que quieras usar y guarda.':'Configura al menos un canal para poder elegirlo aquí.';
+  const save=$('#saveNotificationRoutes');if(save){save.disabled=!channels.length;save.onclick=async()=>{const selected={form:[],phone:[],complaint:[]};$$('[data-route-type]',host).forEach(input=>{if(input.checked)selected[input.dataset.routeType].push(input.dataset.routeChannel);});save.disabled=true;const result=await db.functions.invoke('manage-integration',{body:{company_id:currentCompany.id,action:'save_routes',routes:selected}});save.disabled=false;if(result.error){toast(errorText(result.error),'No se pudieron guardar los destinos');return;}toast('Se han guardado los canales seleccionados.','Destinos guardados');}};
+}
 async function configureIntegration(kind) {
   let config={};
   if(kind==='telegram') {
-    const answer=await formDialog({title:'Configurar Telegram',description:'Introduce los datos del bot y el chat de destino.',fields:[{key:'bot_token',label:'Token del bot',type:'password',required:true},{key:'chat_id',label:'ID del chat o grupo',required:true}]});
+    const answer=await formDialog({title:'Configurar Telegram',description:'Usa el mismo bot, pero indica el grupo de avisos y otro grupo separado para reclamaciones o anulaciones.',fields:[{key:'bot_token',label:'Token del bot',type:'password',required:true},{key:'chat_id',label:'ID del grupo para avisos',required:true},{key:'complaint_chat_id',label:'ID del grupo para reclamaciones o anulaciones',required:true}]});
     if(!answer)return;config=answer;
   } else if(kind==='whatsapp') {
-    const answer=await formDialog({title:'Configurar WhatsApp Business',description:'Necesitas tu token y el ID del número de WhatsApp de Meta, un número de destino con prefijo de país y una plantilla de mensaje aprobada. Sin programación: el CRM rellena automáticamente 5 variables en este orden: landing, hora, cliente, teléfono y aparato.',fields:[{key:'access_token',label:'Token de acceso de Meta',type:'password',required:true},{key:'phone_number_id',label:'ID del número de WhatsApp',required:true},{key:'to',label:'Número que recibirá los avisos (con prefijo de país)',placeholder:'34600111222',required:true},{key:'template_name',label:'Nombre de la plantilla aprobada',placeholder:'aviso_nuevo',required:true},{key:'language',label:'Idioma de la plantilla',placeholder:'es',value:'es',required:true}]});
+    const answer=await formDialog({title:'Configurar WhatsApp Business',description:'Necesitas tu token y el ID del número de WhatsApp de Meta, un número de destino con prefijo de país y una plantilla de mensaje aprobada. Sin programación: el CRM rellena automáticamente 5 variables.',fields:[{key:'access_token',label:'Token de acceso de Meta',type:'password',required:true},{key:'phone_number_id',label:'ID del número de WhatsApp',required:true},{key:'to',label:'Número que recibirá los avisos (con prefijo de país)',placeholder:'34600111222',required:true},{key:'template_name',label:'Nombre de la plantilla aprobada',placeholder:'aviso_nuevo',required:true},{key:'language',label:'Idioma de la plantilla',placeholder:'es',value:'es',required:true}]});
     if(!answer)return;config={...answer,to:answer.to.replace(/\D/g,'')};
   } else {
     const answer=await formDialog({title:'Configurar correo',description:'Datos del servicio de envío Resend.',fields:[{key:'api_key',label:'API key de Resend',type:'password',required:true},{key:'from',label:'Remitente verificado',placeholder:'CRM <avisos@dominio.com>',required:true},{key:'to',label:'Correos destinatarios (separados por comas)',type:'textarea',required:true}]});
@@ -573,6 +616,7 @@ async function configureIntegration(kind) {
   }
   const {error}=await db.functions.invoke('manage-integration',{body:{company_id:currentCompany.id,kind,config,enabled:true}});
   toast(error?errorText(error):'Integración guardada de forma privada.',error?'No se pudo guardar':'Conexión guardada');
+  if(!error)await renderNotificationRoutes();
 }
 async function testIntegration(kind) {
   const {error}=await db.functions.invoke('notify-test',{body:{company_id:currentCompany.id,kind}});
@@ -591,7 +635,7 @@ function showPage(name) {
   const pageName=(name==='avisos-landing'||name==='avisos-phone')?'avisos':name;
   $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+pageName));
   $$('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
-  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',reclamaciones:'Reclamaciones',empresas:'Empresas',usuarios:'Usuarios y permisos',configuracion:'Configuración',integraciones:'Integraciones'};
+  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',reclamaciones:'Reclamaciones o anulaciones',empresas:'Empresas',usuarios:'Usuarios y permisos',configuracion:'Configuración',integraciones:'Integraciones'};
   $('#breadcrumb').textContent='Panel / '+labels[name];
   if(pageName==='avisos'){
     noticeSource=name==='avisos-phone'?'phone':'landing';
@@ -603,6 +647,7 @@ function showPage(name) {
     $('#latestNoticesTitle').textContent=phone?'Últimos avisos por teléfono':'Últimos avisos por formulario';
     renderRows();
   }
+  if(pageName==='reclamaciones')renderComplaints();
   $('#sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'});
 }
 function wireUI() {
@@ -613,7 +658,9 @@ function wireUI() {
   ['reportWeekday','reportLanding','reportStatus'].forEach(id=>$('#'+id).addEventListener('change',renderReport));
   $$('[data-notice-view]').forEach(button=>button.addEventListener('click',()=>setNoticeView(button.dataset.noticeView)));
   $('#cardFieldsToggle').addEventListener('click',()=>{$('#cardFieldPanel').hidden=!$('#cardFieldPanel').hidden;});
-  $('#newNotice').addEventListener('click',()=>{syncDefaultFields();renderExtraFields();$('#modal').classList.add('open');$('#fName').focus();});
+  $('#newNotice').addEventListener('click',()=>openPhoneNotice('aviso'));
+  $('#newComplaint').addEventListener('click',()=>openPhoneNotice('reclamacion'));
+  $('#fRecordType').addEventListener('change',()=>{syncDefaultFields();renderExtraFields();updateRecordFormMode();});
   $('#closeModal').addEventListener('click',()=>$('#modal').classList.remove('open'));
   $('#cancelModal').addEventListener('click',()=>$('#modal').classList.remove('open'));
   $('#modal').addEventListener('click',e=>{if(e.target.id==='modal')e.currentTarget.classList.remove('open');});
