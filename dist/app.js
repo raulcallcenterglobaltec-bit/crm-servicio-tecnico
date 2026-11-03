@@ -134,7 +134,7 @@ async function loadMemberships() {
   if(!companies.length){showOnboarding();return;}
   currentCompany=companies.find(c=>c.id===currentCompany?.id)||companies[0];
   $('#authScreen')?.remove();
-  mountSignOut(); renderCompanyPicker(); await loadCompanyData();
+  mountSignOut(); renderCompanyPicker(); renderCompanyPage(); renderMembers(); renderIntegrations(); renderSettings(); await loadCompanyData();
 }
 function showOnboarding() {
   $('#authIntro').textContent='Tu usuario todavía no está asociado a una empresa. Crea la primera para empezar.';
@@ -381,12 +381,24 @@ async function uploadLogo(e) {
   if(saveError){toast(errorText(saveError),'No se pudo guardar el logo');return;}
   currentCompany.logo_path=data.publicUrl;renderSettings();toast('Logo actualizado.');
 }
+async function addCompany() {
+  const button=$('#page-empresas .page-head .primary-btn');
+  const answer=await formDialog({title:'Añadir empresa',description:'La nueva empresa tendrá sus propios avisos y configuración.',fields:[{key:'name',label:'Nombre de la empresa',required:true}]});
+  if(!answer?.name.trim())return;
+  if(button)button.disabled=true;
+  try {
+    const {error}=await db.rpc('create_company_for_self',{company_name:answer.name.trim()});
+    if(error)throw error;
+    toast('Empresa creada.');
+    await loadMemberships();
+  } catch(error) { toast(errorText(error),'No se pudo crear la empresa'); }
+  finally { if(button)button.disabled=false; }
+}
 function renderCompanyPage() {
   const section=$('#page-empresas');if(!section)return;
   let grid=$('.simple-grid',section);if(!grid)return;
   grid.innerHTML=companies.map(c=>`<button class="placeholder-tile" data-company-card="${c.id}" style="text-align:left;cursor:pointer"><div class="company-badge">${esc(c.name.slice(0,2).toUpperCase())}</div><strong>${esc(c.name)}</strong><small>${c.id===currentCompany.id?'Empresa actual':'Cambiar a esta empresa'}</small></button>`).join('')||'<div class="empty">Crea tu primera empresa.</div>';
-  $$('[data-company-card]',grid).forEach(b=>b.onclick=()=>{currentCompany=companies.find(c=>c.id===b.dataset.companyCard);renderCompanyPicker();loadCompanyData();});
-  const add=$('.page-head .primary-btn',section);if(add){add.onclick=async()=>{const answer=await formDialog({title:'Añadir empresa',description:'La nueva empresa tendrá sus propios avisos y configuración.',fields:[{key:'name',label:'Nombre de la empresa',required:true}]});if(!answer?.name.trim())return;const name=answer.name;const {data,error}=await db.rpc('create_company_for_self',{company_name:name.trim()});if(error)toast(errorText(error),'No se pudo crear');else await loadMemberships();};}
+  $('[data-company-card]',grid).forEach(b=>b.onclick=()=>{currentCompany=companies.find(c=>c.id===b.dataset.companyCard);renderCompanyPicker();loadCompanyData();});
 }
 function renderMembers() {
   const section=$('#page-usuarios');if(!section)return;
@@ -454,6 +466,7 @@ function wireUI() {
   $('#showToast').addEventListener('click',()=>toast('Los avisos nuevos aparecerán aquí al entrar desde una landing.','Notificaciones'));
   $('#exportBtn').addEventListener('click',()=>exportCsv(false));$('#reportExport').addEventListener('click',()=>exportCsv(true));
   $('#addField').addEventListener('click',addField);
+  $('#page-empresas .page-head .primary-btn').addEventListener('click',addCompany);
   $('#saveSettings').addEventListener('click',saveCompanySettings);
   $('#addPrice').addEventListener('click',addTariff);
 }
