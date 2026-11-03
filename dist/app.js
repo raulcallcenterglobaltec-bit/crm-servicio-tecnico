@@ -406,7 +406,7 @@ function showLandingCode(landing) {
   const backdrop=document.createElement('div');backdrop.className='modal-backdrop open';backdrop.innerHTML=`<div class="modal" style="max-width:640px"><div class="modal-head"><div><h2>Conectar ${esc(landing.name)}</h2><p>Endpoint y ejemplo de envío desde el formulario.</p></div><button class="close">×</button></div><p><strong>URL:</strong></p><div class="integration-code">${esc(endpoint)}</div><p><strong>Clave de landing:</strong></p><div class="integration-code">${esc(landing.endpoint_key)}</div><p><strong>Ejemplo JavaScript:</strong></p><div class="integration-code">${esc(code)}</div><div class="modal-actions"><button class="outline-btn" id="copyLandingCode">Copiar código</button><button class="primary-btn close-code">Cerrar</button></div></div>`;
   document.body.append(backdrop);$('.close',backdrop).onclick=()=>backdrop.remove();$('.close-code',backdrop).onclick=()=>backdrop.remove();$('#copyLandingCode',backdrop).onclick=async()=>{await navigator.clipboard.writeText(code);toast('Código copiado.');};
 }
-document.querySelectorAll('.nav button[data-page]').forEach(b=>b.addEventListener('click',()=>showPage(b.dataset.page)));
+
 function showPage(name) {
   $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+name));
   $$('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
@@ -414,6 +414,7 @@ function showPage(name) {
   $('#breadcrumb').textContent='Panel / '+labels[name];$('#sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'});
 }
 function wireUI() {
+  $('#sidebar').addEventListener('click',event=>{const button=event.target.closest('button[data-page]');if(button){event.preventDefault();showPage(button.dataset.page);}});
   setupDate('main');setupDate('report');
   ['tableSearch','globalSearch'].forEach(id=>$('#'+id).addEventListener('input',renderRows));
   ['statusFilter','landingFilter','weekdayFilter'].forEach(id=>$('#'+id).addEventListener('change',renderRows));
