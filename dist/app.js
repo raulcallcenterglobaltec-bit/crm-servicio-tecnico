@@ -196,6 +196,7 @@ function renderLandingOptions() {
   const form=$('#fLanding');if(form)form.innerHTML=landingOptions(form.value);
   const fieldLanding=$('#newFieldLanding');if(fieldLanding){const chosen=fieldLanding.value;fieldLanding.innerHTML='<option value="">Todas las landings</option>'+landings.filter(l=>l.is_active).map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');fieldLanding.value=chosen;}
 }
+function statusLabel(s) { return s==='Sale'?'Aviso Sacado':s==='No sale'?'Aviso Nulo':s==='Nuevo'?'Nuevo':'—'; }
 function statusClass(s) { return s==='Sale'?'sold':s==='No sale'?'lost':'new'; }
 function getUnitPrice(n) {
   if(n.status==='Sale')return Number(n.unit_price||0);
@@ -241,7 +242,7 @@ function renderRows() {
       if(f.field_key==='phone')return `<td>${esc(v||'—')}</td>`;
       return `<td>${esc(v||'—')}</td>`;
     }).join('');
-    return `<tr>${cells}<td><span class="source">${esc(landingName(n.landing_id))}</span></td><td>${esc(formatDate(n.received_at))}</td><td><select class="status ${statusClass(n.status)}" data-status-id="${n.id}" aria-label="Cambiar estado">${['Nuevo','Sale','No sale'].map(s=>`<option ${s===n.status?'selected':''}>${s}</option>`).join('')}</select></td><td>${n.status==='Sale'?money(getUnitPrice(n)):'—'}</td><td><button class="row-action" data-open-id="${n.id}" aria-label="Abrir aviso">···</button></td></tr>`;
+    return `<tr>${cells}<td><span class="source">${esc(landingName(n.landing_id))}</span></td><td>${esc(formatDate(n.received_at))}</td><td><select class="status ${statusClass(n.status)}" data-status-id="${n.id}" aria-label="Cambiar estado">${['Nuevo','Sale','No sale'].map(s=>`<option value="${esc(s)}" ${s===n.status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select></td><td>${n.status==='Sale'?money(getUnitPrice(n)):'—'}</td><td><button class="row-action" data-open-id="${n.id}" aria-label="Abrir aviso">···</button></td></tr>`;
   }).join('');
   $('#emptyState').hidden=rows.length>0;
   $('#rowCount').textContent=`Mostrando ${rows.length} de ${notices.length} avisos`;
@@ -269,7 +270,7 @@ async function changeStatus(id,status) {
 function showDetails(id) {
   const n=notices.find(x=>x.id===id);if(!n)return;
   const custom=Object.entries(n.custom_fields||{}).map(([k,v])=>`${fields.find(f=>f.field_key===k)?.label||k}: ${v}`).join('\n');
-  infoDialog('Detalle del aviso',`Cliente: ${n.customer_name}\nTeléfono: ${n.phone}\nCorreo: ${n.email||'—'}\nAparato: ${n.device||'—'}\nOrigen: ${landingName(n.landing_id)}\nEstado: ${n.status}\nRecibido: ${formatDate(n.received_at)}\nLocalidad: ${n.locality||'—'}\nCódigo postal: ${n.postal_code||'—'}\nMarca: ${n.brand||'—'}\nAvería: ${n.issue||'—'}\n${custom}`);
+  infoDialog('Detalle del aviso',`Cliente: ${n.customer_name}\nTeléfono: ${n.phone}\nCorreo: ${n.email||'—'}\nAparato: ${n.device||'—'}\nOrigen: ${landingName(n.landing_id)}\nEstado: ${statusLabel(n.status)}\nRecibido: ${formatDate(n.received_at)}\nLocalidad: ${n.locality||'—'}\nCódigo postal: ${n.postal_code||'—'}\nMarca: ${n.brand||'—'}\nAvería: ${n.issue||'—'}\n${custom}`);
 }
 function setupDate(prefix) {
   const report=prefix==='report', select=$('#'+(report?'reportPeriod':'period'));
@@ -286,8 +287,8 @@ function renderReport() {
   $('#reportConversion').textContent=`${managed?Math.round(sold.length/managed*100):0} %`;
   $('#reportManagedCount').textContent=`${managed} avisos gestionados`;
   $('#reportRevenue').textContent=money(revenue);$('#reportTotal').textContent=rows.length;
-  $('#reportBestLanding').textContent=best?.total?best.landing.name:'—';$('#reportBestDetail').textContent=best?.total?`${best.total} avisos · ${best.sold} sale`:'0 avisos sacados';
-  $('#reportLandingResults').innerHTML=groups.map(g=>`<div class="placeholder-tile"><strong>${esc(g.landing.name)}</strong><small>${g.total} avisos · ${g.sold} sale · ${g.lost} no sale</small></div>`).join('')||'<div class="empty">Añade una landing para empezar.</div>';
+  $('#reportBestLanding').textContent=best?.total?best.landing.name:'—';$('#reportBestDetail').textContent=best?.total?`${best.total} avisos · ${best.sold} Avisos Sacados`:'0 avisos sacados';
+  $('#reportLandingResults').innerHTML=groups.map(g=>`<div class="placeholder-tile"><strong>${esc(g.landing.name)}</strong><small>${g.total} avisos · ${g.sold} Avisos Sacados · ${g.lost} Avisos Nulos</small></div>`).join('')||'<div class="empty">Añade una landing para empezar.</div>';
   const totals=new Map();sold.forEach(n=>{const k=`${landingName(n.landing_id)} · ${n.category||'Sin categoría'}`,v=totals.get(k)||{amount:0,count:0};v.amount+=Number(n.unit_price||0);v.count++;totals.set(k,v);});
   $('#reportPriceRows').innerHTML=[...totals].sort((a,b)=>b[1].amount-a[1].amount).map(([label,v])=>`<div style="display:flex;justify-content:space-between;border-bottom:1px solid #f0f1f5;padding:8px 0;font-size:11px"><span>${esc(label)} <small>(${v.count})</small></span><strong>${money(v.amount)}</strong></div>`).join('')||'<div class="empty">No hay avisos sacados en este filtro.</div>';
 }
@@ -500,7 +501,7 @@ async function addTariff() {
 async function exportCsv(report=false) {
   const rows=filteredNotices(report);
   const columns=['Recibido','Estado','Cliente','Teléfono','Correo','Landing','Aparato','Categoría','Localidad','Código postal','Marca','Avería','Importe',...fields.filter(f=>f.visible_in_table).map(f=>f.label)];
-  const csv=[columns,...rows.map(n=>[formatDate(n.received_at),n.status,n.customer_name,n.phone,n.email||'',landingName(n.landing_id),n.device||'',n.category||'',n.locality||'',n.postal_code||'',n.brand||'',n.issue||'',n.status==='Sale'?n.unit_price:'',...fields.filter(f=>f.visible_in_table).map(f=>n.custom_fields?.[f.field_key]??n[f.field_key]??'')])].map(r=>r.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(',')).join('\r\n');
+  const csv=[columns,...rows.map(n=>[formatDate(n.received_at),statusLabel(n.status),n.customer_name,n.phone,n.email||'',landingName(n.landing_id),n.device||'',n.category||'',n.locality||'',n.postal_code||'',n.brand||'',n.issue||'',n.status==='Sale'?n.unit_price:'',...fields.filter(f=>f.visible_in_table).map(f=>n.custom_fields?.[f.field_key]??n[f.field_key]??'')])].map(r=>r.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(',')).join('\r\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));a.download='avisos-'+new Date().toISOString().slice(0,10)+'.csv';a.click();URL.revokeObjectURL(a.href);
 }
 document.addEventListener('DOMContentLoaded',()=>{wireUI();openAuth();if(!db)return;db.auth.getSession().then(({data,error})=>{if(error){$('#authError').textContent=errorText(error);return;}if(data.session){user=data.session.user;loadMemberships().catch(e=>{const message='No se pudo cargar tu empresa: '+errorText(e);setConnectionError(message);if($('#authError'))$('#authError').textContent=message;});}});db.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_IN'&&session){user=session.user;setTimeout(()=>loadMemberships().catch(e=>{const message='No se pudo cargar tu empresa: '+errorText(e);setConnectionError(message);if($('#authError'))$('#authError').textContent=message;openAuth();}),0);}if(event==='SIGNED_OUT'){user=null;location.reload();}});});
