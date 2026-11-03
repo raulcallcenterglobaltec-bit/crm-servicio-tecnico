@@ -6,7 +6,7 @@ const $$ = (s, root=document) => [...root.querySelectorAll(s)];
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = value => Number(value || 0).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
 const categoryFor = device => /aire acondicionado|aerotermia|bomba de calor|acs|caldera|calentador|termo/i.test(String(device||'')) ? 'Clima' : (device ? 'Gama blanca' : null);
-let user=null, isSuperAdmin=false, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, noticeSource='landing', fieldScope='phone', noticeView='table';
+let user=null, isSuperAdmin=false, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, noticeSource='landing', fieldScope='phone', noticeView='table', relatedNoticeMatch=null;
 let fieldEditorRows=[];
 let authMode='login', selectedDate=new Date().toISOString().slice(0,10);
 const defaultFields=[
@@ -151,7 +151,7 @@ function applyAccessPermissions() {
   const picker=$('.company-select');if(picker)picker.hidden=!isSuperAdmin;
   const separator=$('.top-sep');if(separator)separator.hidden=!isSuperAdmin;
   const current=members.find(m=>m.user_id===user?.id);
-  $$('[data-page]').forEach(button=>{if(['empresas','usuarios','configuracion','integraciones'].includes(button.dataset.page))button.hidden=!isSuperAdmin;});
+  $$('[data-page]').forEach(button=>{if(['empresas','usuarios','personalizacion','configuracion','integraciones'].includes(button.dataset.page))button.hidden=!isSuperAdmin;});
   const createButton=$('#newNotice');if(createButton)createButton.hidden=!isSuperAdmin&&current?.role==='consulta';
   const createComplaint=$('#newComplaint');if(createComplaint)createComplaint.hidden=!isSuperAdmin&&current?.role==='consulta';
 }
@@ -169,6 +169,15 @@ function applyCompanyTheme(color) {
   const rgb=accent.slice(1).match(/.{2}/g).map(x=>parseInt(x,16)).join(',');
   root.style.setProperty('--accent-shadow',`rgba(${rgb},.32)`);
 }
+function renderCompanyBrand() {
+  const brand=$('.brand');if(!brand)return;
+  const mark=$('.brand-mark',brand),name=$('.brand small',brand);
+  if(mark){
+    if(currentCompany?.logo_path)mark.innerHTML=`<img src="${esc(currentCompany.logo_path)}" alt="Logo de ${esc(currentCompany.name||'la empresa')}" style="width:100%;height:100%;object-fit:contain;border-radius:inherit;background:#fff;padding:3px"/>`;
+    else mark.textContent=(currentCompany?.name||'T').trim().slice(0,1).toUpperCase();
+  }
+  if(name)name.textContent=currentCompany?.name||'Servicio técnico';
+}
 function renderCompanyPicker() {
   const old=$('.company-select');if(!old)return;
   if(!isSuperAdmin){old.hidden=true;const separator=$('.top-sep');if(separator)separator.hidden=true;return;}
@@ -179,6 +188,7 @@ function renderCompanyPicker() {
   $('#companySwitch').innerHTML=companies.map(c=>`<option value="${c.id}" ${c.id===currentCompany.id?'selected':''}>${esc(c.name)}</option>`).join('');
   $('#companySwitch').addEventListener('change',async e=>{currentCompany=companies.find(c=>c.id===e.target.value);await loadCompanyData();});
   applyCompanyTheme(currentCompany.primary_color);
+  renderCompanyBrand();
 }
 async function fetchAllNotices(companyId) {
   const all=[];let from=0;const batch=1000;
@@ -187,6 +197,7 @@ async function fetchAllNotices(companyId) {
 }
 async function loadCompanyData() {
   if(!currentCompany)return;
+  renderCompanyBrand();
   applyCompanyTheme(currentCompany.primary_color);
   document.title=currentCompany.name+' · CRM Gestión de avisos';
   try {
@@ -473,12 +484,12 @@ async function renderFields() {
   const list=$('#fieldList');if(!list)return;
   const selectedLanding=fieldScope==='landing'?($('#fieldLandingFilter')?.value||''):null;
   fieldEditorRows=fields.filter(f=>f.channel===fieldScope&&(fieldScope==='phone'?!f.landing_id:(selectedLanding?f.landing_id===selectedLanding:!f.landing_id)));
-  const title=$('#fieldEditorTitle');if(title)title.textContent=fieldScope==='phone'?'Campos de aviso por teléfono':'Campos de aviso por landing';
-  const description=$('#fieldEditorDescription');if(description)description.textContent=fieldScope==='phone'?'Configura los datos de los avisos que se reciben por teléfono.':'Los campos generales se aplican a todas las landing. Selecciona una landing para configurar sus campos específicos.';
+  const title=$('#fieldEditorTitle');if(title)title.textContent=fieldScope==='phone'?'Campos de llamadas telefónicas':'Campos de aviso por landing';
+  const description=$('#fieldEditorDescription');if(description)description.textContent=fieldScope==='phone'?'Estos campos se comparten entre avisos, reclamaciones y anulaciones por teléfono. «Obligatorio» exige el dato; «Ver en tabla» lo muestra en la lista; «Ver en tarjetas» lo muestra en el tablero; «Mostrar al registrar llamada» lo incluye en el formulario telefónico.':'Los campos generales se aplican a todas las landing. «Obligatorio» exige el dato; «Ver en tabla» y «Ver en tarjetas» deciden dónde aparece en el CRM; «Incluir en formulario web» lo añade al formulario. Selecciona una landing para configurar sus campos específicos.';
   const landingWrap=$('#landingFieldControls');if(landingWrap)landingWrap.hidden=fieldScope==='phone';
   const typeNames={text:'Texto',phone:'Teléfono',email:'Correo',number:'Número',date:'Fecha',select:'Lista',textarea:'Texto largo',checkbox:'Casilla'};
   const formColumnLabel=fieldScope==='phone'?'Mostrar al registrar llamada':'Incluir en formulario web';
-  list.innerHTML=fieldEditorRows.map((f,i)=>`<div class="field-row" style="grid-template-columns:minmax(125px,1fr) 100px auto auto auto auto auto auto;gap:6px"><input data-field-label="${i}" aria-label="Nombre del campo" value="${esc(f.label)}"/><select data-field-type="${i}" aria-label="Tipo de campo">${Object.entries(typeNames).map(([key,label])=>`<option value="${key}" ${f.field_type===key?'selected':''}>${label}</option>`).join('')}</select><label><input type="checkbox" data-field-required="${i}" ${f.required?'checked':''}/> Obligatorio</label><label><input type="checkbox" data-field-table="${i}" ${f.visible_in_table?'checked':''}/> Columna</label><label><input type="checkbox" data-field-card-config="${i}" ${f.visible_on_card?'checked':''} ${f.field_key==='customer_name'?'disabled':''}/> Tarjeta</label><label><input type="checkbox" data-field-form="${i}" ${f.visible_in_form?'checked':''}/> ${formColumnLabel}</label><small>${fieldScope==='phone'?'Llamada telefónica':f.landing_id?esc(landingName(f.landing_id)):'Todas las landings'}</small><button class="mini-delete" data-field-delete="${i}" aria-label="Eliminar campo">×</button></div>`).join('')||'<div class="empty">No hay campos exclusivos en esta selección. Los campos generales se mantienen si has seleccionado una landing.</div>';
+  list.innerHTML=fieldEditorRows.map((f,i)=>`<div class="field-row" style="grid-template-columns:minmax(125px,1fr) 100px auto auto auto auto auto auto;gap:6px"><input data-field-label="${i}" aria-label="Nombre del campo" value="${esc(f.label)}"/><select data-field-type="${i}" aria-label="Tipo de campo">${Object.entries(typeNames).map(([key,label])=>`<option value="${key}" ${f.field_type===key?'selected':''}>${label}</option>`).join('')}</select><label title="La persona tendrá que rellenar este dato"><input type="checkbox" data-field-required="${i}" ${f.required?'checked':''}/> Obligatorio</label><label title="Mostrar este dato como columna en la tabla de avisos"><input type="checkbox" data-field-table="${i}" ${f.visible_in_table?'checked':''}/> Ver en tabla</label><label title="Mostrar este dato en las tarjetas del tablero"><input type="checkbox" data-field-card-config="${i}" ${f.visible_on_card?'checked':''} ${f.field_key==='customer_name'?'disabled':''}/> Ver en tarjetas</label><label title="${fieldScope==='phone'?'Mostrar al registrar avisos, reclamaciones o anulaciones':'Incluir este campo en el formulario de la landing'}"><input type="checkbox" data-field-form="${i}" ${f.visible_in_form?'checked':''}/> ${formColumnLabel}</label><small>${fieldScope==='phone'?'Todas las llamadas':f.landing_id?esc(landingName(f.landing_id)):'Todas las landings'}</small><button class="mini-delete" data-field-delete="${i}" aria-label="Eliminar campo">×</button></div>`).join('')||'<div class="empty">No hay campos exclusivos en esta selección. Los campos generales se mantienen si has seleccionado una landing.</div>';
   $$('[data-field-label]').forEach(x=>x.addEventListener('change',async e=>{const i=+e.target.dataset.fieldLabel,label=e.target.value.trim();if(!label){e.target.value=fieldEditorRows[i].label;return;}await saveField(i,{label});}));
   $$('[data-field-type]').forEach(x=>x.addEventListener('change',async e=>{const i=+e.target.dataset.fieldType,field_type=e.target.value;let options=fieldEditorRows[i].options||[];if(field_type==='select'){const answer=await formDialog({title:'Opciones del campo',description:'Escribe las opciones separadas por comas.',fields:[{key:'options',label:'Opciones',type:'text',value:options.join(', '),required:true}]});if(!answer){renderFields();return;}options=answer.options.split(',').map(v=>v.trim()).filter(Boolean);}await saveField(i,{field_type,options});}));
   $$('[data-field-required]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldRequired,{required:e.target.checked})));
@@ -525,7 +536,7 @@ function updateRecordFormMode() {
     const previous=status.value;
     statusLabel.textContent='Resultado de la llamada';
     status.innerHTML='<option value="Sale">Enviar reclamación o anulación</option><option value="No sale">No es nuestra (cliente equivocado)</option>';
-    status.value=previous==='No sale'?'No sale':'Sale';
+    status.value=previous==='Sale'||previous==='No sale'?previous:(relatedNoticeMatch?'Sale':'No sale');
   } else if(status&&statusLabel){
     statusLabel.textContent='Resultado del aviso';
     status.innerHTML='<option value="Nuevo">Pendiente</option><option value="Sale">Aviso Sacado</option><option value="No sale">Aviso Nulo</option>';
@@ -536,7 +547,9 @@ function updateRecordFormMode() {
   if(brandField&&nonNotice)brandField.hidden=true;
   if(issueField&&nonNotice)issueField.hidden=false;
   const issueLabel=$('#fIssueLabel'),issue=$('#fIssue');
-  if(issueLabel)issueLabel.textContent=type==='anulacion'?'Detalle de la anulación':type==='reclamacion'?'Motivo de la reclamación':'Avería o comentario';
+  const configuredIssueLabel=fieldsForPhone().find(f=>f.field_key==='issue')?.label;
+  const customIssueLabel=configuredIssueLabel&&configuredIssueLabel!=='Avería o comentario';
+  if(issueLabel)issueLabel.textContent=customIssueLabel?configuredIssueLabel:type==='anulacion'?'Detalle de la anulación':type==='reclamacion'?'Motivo de la reclamación':'Avería o comentario';
   if(issue) {issue.placeholder=nonNotice?(type==='anulacion'?'Describe qué servicio, cita o solicitud se quiere anular':'Describe exactamente qué reclama el cliente'):'Describe brevemente el problema';issue.required=nonNotice;}
   $('#modalTitle').textContent=type==='anulacion'?'Registrar anulación':type==='reclamacion'?'Registrar reclamación':'Añadir aviso';
   $('#modalDescription').textContent=nonNotice?'Completa los datos de la persona y el detalle de la reclamación o anulación.':'Completa los datos para registrar un aviso telefónico.';
@@ -547,11 +560,39 @@ function updateRecordSubmitLabel() {
   if(!submit)return;
   submit.textContent=type==='aviso'?'Guardar aviso':status==='Sale'?(type==='anulacion'?'Enviar anulación':'Enviar reclamación'):'Registrar cliente equivocado';
 }
-function openPhoneNotice(type='aviso') {
+function normalizePhoneForMatch(value) {
+  let digits=String(value||'').replace(/\D/g,'');
+  if(digits.startsWith('0034'))digits=digits.slice(4);else if(digits.startsWith('34')&&digits.length>9)digits=digits.slice(2);
+  return digits.length>=9?digits.slice(-9):digits;
+}
+function findPreviousNoticeByPhone(value) {
+  const phone=normalizePhoneForMatch(value);if(phone.length<9)return null;
+  return notices.filter(n=>n.notice_type==='aviso'&&n.status==='Sale'&&normalizePhoneForMatch(n.phone)===phone)
+    .sort((a,b)=>new Date(b.received_at)-new Date(a.received_at))[0]||null;
+}
+async function openPhoneNotice(type='aviso') {
+  let lookupPhone='',matched=null;
+  if(type!=='aviso') {
+    const answer=await formDialog({title:'Buscar aviso anterior',description:'¿Qué número de teléfono facilitó al dar el aviso? Buscaremos un aviso técnico marcado como sacado en esta empresa.',fields:[{key:'phone',label:'Número de teléfono que facilitó al dar el aviso',type:'tel',required:true}],confirmText:'Buscar aviso'});
+    if(!answer)return;
+    lookupPhone=answer.phone.trim();matched=findPreviousNoticeByPhone(lookupPhone);
+    if(matched)toast(`Encontrado: ${matched.customer_name||'Cliente'} · ${matched.device||matched.category||'Aviso técnico'} · ${formatDate(matched.received_at)}`,'Aviso sacado encontrado');
+    else toast('No encontramos un aviso sacado con ese número en esta empresa. Podrás completar los datos y marcar el resultado.','Sin aviso relacionado');
+  }
+  relatedNoticeMatch=matched;
   noticeSource='phone';$('#noticeForm').reset();
   $('#fRecordType').innerHTML=type==='aviso'?'<option value="aviso">Aviso técnico</option>':'<option value="reclamacion">Reclamación</option><option value="anulacion">Anulación</option>';
   $('#fRecordType').value=type;
   syncDefaultFields();renderExtraFields();updateRecordFormMode();
+  if(type!=='aviso') {
+    const prior=matched||{};
+    $('#fPhone').value=prior.phone||lookupPhone;
+    $('#fName').value=prior.customer_name||'';
+    $('#fLocality').value=prior.locality||'';
+    $('#fPostal').value=prior.postal_code||'';
+    const hint=$('#relatedNoticeHint');
+    if(hint){hint.hidden=false;hint.className=matched?'notice-match found':'notice-match missing';hint.textContent=matched?`Aviso encontrado: ${matched.device||matched.category||'Aviso técnico'} · ${matched.locality||'Localidad sin indicar'} · ${formatDate(matched.received_at)} · ${matched.landing_id?landingName(matched.landing_id):'Teléfono'}. Datos del cliente completados.`:'No hay un aviso sacado asociado. Comprueba el número y completa los datos manualmente.';}
+  } else {const hint=$('#relatedNoticeHint');if(hint)hint.hidden=true;}
   $('#modal').classList.add('open');$('#fName').focus();
 }
 async function createNotice(event) {
@@ -576,18 +617,23 @@ async function createNotice(event) {
 function showSettingsTab(name) {
   $$('[data-settings-tab]').forEach(button=>button.classList.toggle('active',button.dataset.settingsTab===name));
   const panelName=(name==='phone-fields'||name==='landing-fields')?'fields':name;
-  $$('[data-settings-panel]').forEach(panel=>panel.classList.toggle('active',panel.dataset.settingsPanel===panelName));
+  $$('#page-configuracion [data-settings-panel]').forEach(panel=>panel.classList.toggle('active',panel.dataset.settingsPanel===panelName));
   if(name==='phone-fields'){fieldScope='phone';renderFields();}
   if(name==='landing-fields'){fieldScope='landing';renderFields();}
 }
 async function renderSettings() {
+  renderCompanyBrand();
   if(!isSuperAdmin)return;
   if(!currentCompany)return;
   const article=$('#brandPanel');
   if(article) {
     const input=$('input[value="Global Técnicos"]',article)||$('input',article); if(input)input.value=currentCompany.name;
     const color=$('input[type=color]',article);if(color){color.value=currentCompany.primary_color||'#5267e8';color.oninput=()=>applyCompanyTheme(color.value);}
-    if(currentCompany.logo_path&&$('.company-logo',article)==null){const img=document.createElement('img');img.src=currentCompany.logo_path;img.className='company-logo';img.style='max-width:140px;max-height:60px;display:block;margin:10px 0';article.append(img);}
+    let logoPreview=$('.company-logo',article);
+    if(currentCompany.logo_path){
+      if(!logoPreview){logoPreview=document.createElement('img');logoPreview.className='company-logo';logoPreview.alt='Logo de '+currentCompany.name;logoPreview.style='max-width:180px;max-height:72px;object-fit:contain;display:block;margin:10px 0';article.append(logoPreview);}
+      logoPreview.src=currentCompany.logo_path;logoPreview.alt='Logo de '+currentCompany.name;logoPreview.hidden=false;
+    } else if(logoPreview){logoPreview.remove();}
     let file=$('#logoFile',article),button=$('#uploadLogo',article);
     if(!file){file=document.createElement('input');file.type='file';file.accept='image/png,image/jpeg,image/webp,image/svg+xml';file.id='logoFile';file.style='position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none';file.setAttribute('aria-label','Seleccionar archivo de logo');article.append(file);}
     if(!button){button=document.createElement('button');button.id='uploadLogo';button.className='outline-btn';button.textContent='Subir logo';article.append(button);}
@@ -713,7 +759,7 @@ function showPage(name) {
   const pageName=(name==='avisos-landing'||name==='avisos-phone')?'avisos':name;
   $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+pageName));
   $$('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
-  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',reclamaciones:'Reclamaciones o anulaciones',empresas:'Empresas',usuarios:'Usuarios y permisos',configuracion:'Configuración',integraciones:'Integraciones'};
+  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',reclamaciones:'Reclamaciones o anulaciones',empresas:'Empresas',usuarios:'Usuarios y permisos',personalizacion:'Personalización',configuracion:'Configuración',integraciones:'Integraciones'};
   $('#breadcrumb').textContent='Panel / '+labels[name];
   if(pageName==='avisos'){
     noticeSource=name==='avisos-phone'?'phone':'landing';
