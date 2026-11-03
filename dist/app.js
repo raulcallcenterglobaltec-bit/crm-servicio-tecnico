@@ -338,11 +338,21 @@ function renderRows() {
 }
 async function changeStatus(id,status) {
   const n=notices.find(x=>x.id===id);if(!n)return;
+  const wasSale=n.status==='Sale';
   const tariff=tariffs.find(t=>t.landing_id===n.landing_id&&t.category===n.category);
   const patch={status,managed_at:status==='Nuevo'?null:new Date().toISOString(),unit_price:status==='Sale'?Number(tariff?.price||0):0};
   const {data,error}=await db.from('notices').update(patch).eq('id',id).select().single();
   if(error){toast(errorText(error),'No se pudo guardar');renderRows();return;}
   Object.assign(n,data);renderRows();
+  if(!wasSale&&status==='Sale'&&n.created_by&&!n.landing_id)await sendPhoneNoticeToConfiguredIntegrations(n);
+}
+async function sendPhoneNoticeToConfiguredIntegrations(notice) {
+  const {data,error}=await db.functions.invoke('notify-notice',{body:{notice_id:notice.id}});
+  if(error){toast(errorText(error),'Aviso guardado, pero no se pudo enviar');return false;}
+  const results=data?.results||[],sent=results.filter(result=>result.ok).map(result=>({telegram:'Telegram',email:'correo',whatsapp:'WhatsApp'}[result.kind]||result.kind)),failed=results.filter(result=>!result.ok);
+  if(!results.length){toast('No hay integraciones activadas para esta empresa.','Aviso guardado en el CRM');return false;}
+  if(failed.length){const names=failed.map(result=>({telegram:'Telegram',email:'correo',whatsapp:'WhatsApp'}[result.kind]||result.kind)).join(', ');toast(sent.length?`Enviado a ${sent.join(', ')}. Falló: ${names}.`:`No se pudo enviar a ${names}.`,'Aviso guardado con incidencias');return false;}
+  toast(`${notice.customer_name||'Cliente'} · ${notice.device||'Aviso'} · ${sent.join(', ')}`,'Aviso sale adelante y se envió');return true;
 }
 function showDetails(id) {
   const n=notices.find(x=>x.id===id);if(!n)return;
@@ -434,16 +444,19 @@ function syncDefaultFields() {
 }
 async function createNotice(event) {
   event.preventDefault();
+  const submitButtons=$$('#noticeForm button[type="submit"]');
+  submitButtons.forEach(button=>button.disabled=true);
   const v=id=>$('#'+id).value.trim();
   const device=v('fDevice'), custom_fields={};
   $$('[data-custom-key]', $('#noticeForm')).forEach(el=>{const c=$('input,select,textarea',el);custom_fields[el.dataset.customKey]=c.type==='checkbox'?c.checked:c.value;});
   const category=categoryFor(device);
-  const row={company_id:currentCompany.id,landing_id:null,status:'Nuevo',customer_name:v('fName'),phone:v('fPhone'),email:$('#fEmail')?.value?.trim()||null,locality:v('fLocality')||null,postal_code:v('fPostal')||null,device:device||null,category,brand:v('fBrand')||null,issue:v('fIssue')||null,custom_fields,unit_price:0,created_by:user.id};
+  const row={company_id:currentCompany.id,landing_id:null,status:v('fStatus')||'Nuevo',customer_name:v('fName'),phone:v('fPhone'),email:$('#fEmail')?.value?.trim()||null,locality:v('fLocality')||null,postal_code:v('fPostal')||null,device:device||null,category,brand:v('fBrand')||null,issue:v('fIssue')||null,custom_fields,unit_price:0,created_by:user.id};
   const {data,error}=await db.from('notices').insert(row).select().single();
-  if(error){toast(errorText(error),'No se pudo guardar el aviso');return;}
+  if(error){submitButtons.forEach(button=>button.disabled=false);toast(errorText(error),'No se pudo guardar el aviso');return;}
+  submitButtons.forEach(button=>button.disabled=false);
   notices.unshift(data);$('#modal').classList.remove('open');event.target.reset();renderRows();
-  toast(`Teléfono · ${data.device||'Aviso'} · ${formatDate(data.received_at)}`,'Nuevo aviso recibido');
-  db.functions.invoke('notify-notice',{body:{notice_id:data.id}}).catch(()=>{});
+  if(data.status==='Sale')await sendPhoneNoticeToConfiguredIntegrations(data);
+  else toast(`Teléfono · ${data.device||'Aviso'} · ${formatDate(data.received_at)}`,'Aviso guardado en el CRM');
 }
 function showSettingsTab(name) {
   $$('[data-settings-tab]').forEach(button=>button.classList.toggle('active',button.dataset.settingsTab===name));
