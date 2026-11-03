@@ -474,7 +474,7 @@ function syncDefaultFields() {
 }
 function updateRecordFormMode() {
   const type=$('#fRecordType')?.value||'aviso',nonNotice=type!=='aviso';
-  $('#recordTypeWrap').hidden=noticeSource!=='phone';
+  $('#recordTypeWrap').hidden=noticeSource!=='phone'||!nonNotice;
   $('#statusFieldWrap').hidden=noticeSource!=='phone';
   const status=$('#fStatus'),statusLabel=$('#fStatusLabel');
   if(status&&statusLabel&&nonNotice){const previous=status.value;statusLabel.textContent='Resultado de la llamada';status.innerHTML='<option value="Sale">Enviar reclamación o anulación</option><option value="No sale">No es nuestra (cliente equivocado)</option>';status.value=previous==='No sale'?'No sale':'Sale';}
@@ -488,10 +488,17 @@ function updateRecordFormMode() {
   if(issue) {issue.placeholder=nonNotice?(type==='anulacion'?'Describe qué servicio, cita o solicitud se quiere anular':'Describe exactamente qué reclama el cliente'):'Describe brevemente el problema';issue.required=nonNotice;}
   $('#modalTitle').textContent=type==='anulacion'?'Registrar anulación':type==='reclamacion'?'Registrar reclamación':'Añadir aviso';
   $('#modalDescription').textContent=nonNotice?'Completa los datos de la persona y el detalle de la reclamación o anulación.':'Completa los datos para registrar un aviso telefónico.';
-  const submit=$('#noticeForm button[type="submit"]');if(submit)submit.textContent=type==='anulacion'?'Guardar anulación':type==='reclamacion'?'Guardar reclamación':'Guardar aviso';
+  updateRecordSubmitLabel();
+}
+function updateRecordSubmitLabel() {
+  const type=$('#fRecordType')?.value||'aviso',status=$('#fStatus')?.value,submit=$('#noticeForm button[type="submit"]');
+  if(!submit)return;
+  submit.textContent=type==='aviso'?'Guardar aviso':status==='Sale'?(type==='anulacion'?'Enviar anulación':'Enviar reclamación'):'Registrar cliente equivocado';
 }
 function openPhoneNotice(type='aviso') {
-  noticeSource='phone';$('#noticeForm').reset();$('#fRecordType').value=type;
+  noticeSource='phone';$('#noticeForm').reset();
+  $('#fRecordType').innerHTML=type==='aviso'?'<option value="aviso">Aviso técnico</option>':'<option value="reclamacion">Reclamación</option><option value="anulacion">Anulación</option>';
+  $('#fRecordType').value=type;
   syncDefaultFields();renderExtraFields();updateRecordFormMode();
   $('#modal').classList.add('open');$('#fName').focus();
 }
@@ -571,8 +578,22 @@ function renderCompanyPage() {
   if(!isSuperAdmin)return;
   const section=$('#page-empresas');if(!section)return;
   let grid=$('.simple-grid',section);if(!grid)return;
-  grid.innerHTML=companies.map(c=>`<button class="placeholder-tile" data-company-card="${c.id}" style="text-align:left;cursor:pointer"><div class="company-badge">${esc(c.name.slice(0,2).toUpperCase())}</div><strong>${esc(c.name)}</strong><small>${c.id===currentCompany.id?'Empresa actual':'Cambiar a esta empresa'}</small></button>`).join('')||'<div class="empty">Crea tu primera empresa.</div>';
-  $$('[data-company-card]',grid).forEach(b=>b.onclick=()=>{currentCompany=companies.find(c=>c.id===b.dataset.companyCard);renderCompanyPicker();loadCompanyData();});
+  grid.innerHTML=companies.map(c=>'<div class="placeholder-tile" style="display:flex;align-items:center;justify-content:space-between;gap:12px"><button type="button" data-company-card="'+c.id+'" style="flex:1;text-align:left;border:0;background:transparent;color:inherit;padding:0;cursor:pointer"><span class="company-badge">'+esc(c.name.slice(0,2).toUpperCase())+'</span><strong>'+esc(c.name)+'</strong><small>'+(c.id===currentCompany?.id?'Empresa actual':'Cambiar a esta empresa')+'</small></button><button type="button" class="mini-delete" data-delete-company="'+c.id+'" aria-label="Eliminar empresa '+esc(c.name)+'" title="Eliminar empresa" '+(companies.length<=1?'disabled':'')+'>×</button></div>').join('')||'<div class="empty">Crea tu primera empresa.</div>';
+  $('[data-company-card]',grid).forEach(b=>b.onclick=()=>{currentCompany=companies.find(c=>c.id===b.dataset.companyCard);renderCompanyPicker();loadCompanyData();});
+  $('[data-delete-company]',grid).forEach(b=>b.onclick=async()=>{
+    if(companies.length<=1){toast('Debe quedar al menos una empresa.','No se puede eliminar');return;}
+    const company=companies.find(c=>c.id===b.dataset.deleteCompany);if(!company)return;
+    const confirmed=await confirmDialog(`¿Eliminar la empresa «${company.name}»? Se borrarán definitivamente sus avisos, landings, campos, tarifas, usuarios e integraciones. Esta acción no se puede deshacer.`);
+    if(!confirmed)return;
+    b.disabled=true;
+    const {error}=await db.from('companies').delete().eq('id',company.id);
+    if(error){b.disabled=false;toast(errorText(error),'No se pudo eliminar la empresa');return;}
+    companies=companies.filter(c=>c.id!==company.id);
+    if(currentCompany?.id===company.id)currentCompany=companies[0];
+    toast(`La empresa «${company.name}» y sus datos se han eliminado.`,'Empresa eliminada');
+    renderCompanyPage();
+    await loadMemberships();
+  });
 }
 function renderMembers() {
   if(!isSuperAdmin)return;
@@ -666,6 +687,7 @@ function wireUI() {
   $('#newNotice').addEventListener('click',()=>openPhoneNotice('aviso'));
   $('#newComplaint').addEventListener('click',()=>openPhoneNotice('reclamacion'));
   $('#fRecordType').addEventListener('change',()=>{syncDefaultFields();renderExtraFields();updateRecordFormMode();});
+  $('#fStatus').addEventListener('change',updateRecordSubmitLabel);
   $('#closeModal').addEventListener('click',()=>$('#modal').classList.remove('open'));
   $('#cancelModal').addEventListener('click',()=>$('#modal').classList.remove('open'));
   $('#modal').addEventListener('click',e=>{if(e.target.id==='modal')e.currentTarget.classList.remove('open');});
