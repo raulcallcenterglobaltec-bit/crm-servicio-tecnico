@@ -33,8 +33,9 @@ Deno.serve(async (req) => {
             const selected = current.routes
               ? Array.isArray(current.routes[type]) && current.routes[type].includes(row.kind)
               : legacyDefault
-            if (selected && target) saved[type].push(row.kind)
-            else if (selected && !target) blocked[type].push(row.kind)
+            const hasTarget = Array.isArray(target) ? target.length > 0 : !!target
+            if (selected && hasTarget) saved[type].push(row.kind)
+            else if (selected && !hasTarget) blocked[type].push(row.kind)
           }
         }
         return json({ ok: true, channels, routes: saved, blocked, destinations: targets })

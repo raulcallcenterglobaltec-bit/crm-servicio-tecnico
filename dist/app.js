@@ -630,17 +630,22 @@ function normalizePhoneForMatch(value) {
   if(digits.startsWith('0034'))digits=digits.slice(4);else if(digits.startsWith('34')&&digits.length>9)digits=digits.slice(2);
   return digits.length>=9?digits.slice(-9):digits;
 }
-function findPreviousNoticeByPhone(value) {
-  const phone=normalizePhoneForMatch(value);if(phone.length<9)return null;
+function findPreviousNoticesByPhone(value) {
+  const phone=normalizePhoneForMatch(value);if(phone.length<9)return [];
   return notices.filter(n=>n.notice_type==='aviso'&&n.status==='Sale'&&normalizePhoneForMatch(n.phone)===phone)
-    .sort((a,b)=>new Date(b.received_at)-new Date(a.received_at))[0]||null;
+    .sort((a,b)=>new Date(b.received_at)-new Date(a.received_at));
 }
 async function openPhoneNotice(type='aviso') {
   let lookupPhone='',matched=null;
   if(type!=='aviso') {
     const answer=await formDialog({title:'Buscar aviso anterior',description:'¿Qué número de teléfono facilitó al dar el aviso? Buscaremos un aviso técnico marcado como sacado en esta empresa.',fields:[{key:'phone',label:'Número de teléfono que facilitó al dar el aviso',type:'tel',required:true}],confirmText:'Buscar aviso'});
     if(!answer)return;
-    lookupPhone=answer.phone.trim();matched=findPreviousNoticeByPhone(lookupPhone);
+    lookupPhone=answer.phone.trim();const previousNotices=findPreviousNoticesByPhone(lookupPhone);
+    if(previousNotices.length===1)matched=previousNotices[0];
+    else if(previousNotices.length>1){
+      const choose=await formDialog({title:'Seleccionar el aviso',description:'Este número tiene varios avisos sacados. Elige cuál quiere reclamar o anular el cliente.',fields:[{key:'notice_id',label:'Aviso relacionado',type:'select',required:true,options:previousNotices.map(n=>({value:n.id,label:`${n.device||n.category||'Aviso técnico'} · ${n.locality||'Localidad sin indicar'} · ${formatDate(n.received_at)} · ${n.landing_id?landingName(n.landing_id):'Teléfono'}`}))}]});
+      if(!choose)return;matched=previousNotices.find(n=>n.id===choose.notice_id)||null;
+    }
     if(matched)toast(`Encontrado: ${matched.customer_name||'Cliente'} · ${matched.device||matched.category||'Aviso técnico'} · ${formatDate(matched.received_at)}`,'Aviso sacado encontrado');
     else toast('No encontramos un aviso sacado con ese número en esta empresa. Podrás completar los datos y marcar el resultado.','Sin aviso relacionado');
   }
