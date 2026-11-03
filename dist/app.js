@@ -6,7 +6,8 @@ const $$ = (s, root=document) => [...root.querySelectorAll(s)];
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = value => Number(value || 0).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
 const categoryFor = device => /aire acondicionado|aerotermia|bomba de calor|acs|caldera|calentador|termo/i.test(String(device||'')) ? 'Clima' : (device ? 'Gama blanca' : null);
-let user=null, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, noticeSource='landing';
+let user=null, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, noticeSource='landing', fieldScope='phone';
+let fieldEditorRows=[];
 let authMode='login', selectedDate=new Date().toISOString().slice(0,10);
 const defaultFields=[
   {field_key:'customer_name',label:'Nombre y apellidos',field_type:'text',required:true,visible_in_form:true,visible_in_table:true,position:1},
@@ -175,9 +176,9 @@ async function loadCompanyData() {
     ]);
     for(const r of results)if(r.error)throw r.error;
     [landings,notices,tariffs,fields,members]=results.map(r=>r.data||[]);
-    if(!fields.length){const seeds=defaultFields.map(f=>({...f,options:f.options||[],company_id:c}));const {data:createdFields,error}=await db.from('notice_fields').insert(seeds).select();if(error)throw error;fields=createdFields||[];}
-    if(!realtimeChannel){realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();toast(`Landing: ${landingName(payload.new.landing_id)} · ${payload.new.device||'Nuevo aviso'}`,'Nuevo aviso recibido');}}).subscribe();}
-    else {await db.removeChannel(realtimeChannel);realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();toast(`Landing: ${landingName(payload.new.landing_id)} · ${payload.new.device||'Nuevo aviso'}`,'Nuevo aviso recibido');}}).subscribe();}
+    if(!fields.length){const seeds=['phone','landing'].flatMap(channel=>defaultFields.map(f=>({...f,channel,options:f.options||[],company_id:c})));const {data:createdFields,error}=await db.from('notice_fields').insert(seeds).select();if(error)throw error;fields=createdFields||[];}
+    if(!realtimeChannel){realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();toast(`${payload.new.created_by?'Teléfono':'Landing: '+landingName(payload.new.landing_id)} · ${payload.new.device||'Aviso'} · ${formatDate(payload.new.received_at)}`,'Nuevo aviso recibido');}}).subscribe();}
+    else {await db.removeChannel(realtimeChannel);realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();toast(`${payload.new.created_by?'Teléfono':'Landing: '+landingName(payload.new.landing_id)} · ${payload.new.device||'Aviso'} · ${formatDate(payload.new.received_at)}`,'Nuevo aviso recibido');}}).subscribe();}
     $$('.demo-banner').forEach(el=>el.remove());setConnectionError('');
     renderLandingOptions();renderRows();renderReport();renderFields();renderPriceRules();renderCompanyPage();renderMembers();renderIntegrations();renderSettings();
     mountSignOut();
@@ -193,7 +194,6 @@ function landingName(id) { return landings.find(l=>l.id===id)?.name||'Entrada ma
 function landingOptions(selected='') { return '<option value="">Sin landing</option>'+landings.filter(l=>l.is_active).map(l=>`<option value="${l.id}" ${selected===l.id?'selected':''}>${esc(l.name)}</option>`).join(''); }
 function renderLandingOptions() {
   const filters=$('#landingFilter');if(filters)filters.innerHTML='<option value="all">Todas las landings</option>'+landings.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');
-  const form=$('#fLanding');if(form)form.innerHTML=landingOptions(form.value);
   const fieldLanding=$('#newFieldLanding');if(fieldLanding){const chosen=fieldLanding.value;fieldLanding.innerHTML='<option value="">Todas las landings</option>'+landings.filter(l=>l.is_active).map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');fieldLanding.value=chosen;}
 }
 function statusLabel(s) { return s==='Sale'?'Aviso Sacado':s==='No sale'?'Aviso Nulo':s==='Nuevo'?'Nuevo':'—'; }
@@ -232,8 +232,9 @@ function renderRows() {
   const body=$('#noticeRows');if(!body)return;
   const rows=filteredNotices(false);
   const landingFilter=$('#landingFilter')?.value||'all';
-  const shownFields=(landingFilter==='all'?fields:fieldsForLanding(landingFilter)).filter(f=>f.visible_in_table);
-  const systemHead='<th>LANDING DE ORIGEN</th><th>RECIBIDO</th><th>ESTADO</th><th>VALOR</th><th></th>';
+  const shownFields=(noticeSource==='phone'?fieldsForPhone():(landingFilter==='all'?fields.filter(f=>f.channel==='landing'):fieldsForLanding(landingFilter))).filter(f=>f.visible_in_table);
+  const sourceHeading=noticeSource==='phone'?'ORIGEN':'LANDING DE ORIGEN';
+  const systemHead=`<th>${sourceHeading}</th><th>RECIBIDO</th><th>ESTADO</th><th>VALOR</th><th></th>`;
   const th=$('thead tr',body.closest('table'));if(th)th.innerHTML=shownFields.map(f=>`<th>${esc(f.label.toUpperCase())}</th>`).join('')+systemHead;
   body.innerHTML=rows.map(n=>{
     const cells=shownFields.map(f=>{
@@ -243,7 +244,8 @@ function renderRows() {
       if(f.field_key==='phone')return `<td>${esc(v||'—')}</td>`;
       return `<td>${esc(v||'—')}</td>`;
     }).join('');
-    return `<tr>${cells}<td><span class="source">${esc(landingName(n.landing_id))}</span></td><td>${esc(formatDate(n.received_at))}</td><td><select class="status ${statusClass(n.status)}" data-status-id="${n.id}" aria-label="Cambiar estado">${['Nuevo','Sale','No sale'].map(s=>`<option value="${esc(s)}" ${s===n.status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select></td><td>${n.status==='Sale'?money(getUnitPrice(n)):'—'}</td><td><button class="row-action" data-open-id="${n.id}" aria-label="Abrir aviso">···</button></td></tr>`;
+    const sourceLabel=n.created_by?'Teléfono':landingName(n.landing_id);
+    return `<tr>${cells}<td><span class="source">${esc(sourceLabel)}</span></td><td>${esc(formatDate(n.received_at))}</td><td><select class="status ${statusClass(n.status)}" data-status-id="${n.id}" aria-label="Cambiar estado">${['Nuevo','Sale','No sale'].map(s=>`<option value="${esc(s)}" ${s===n.status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select></td><td>${n.status==='Sale'&&!n.created_by?money(getUnitPrice(n)):'—'}</td><td><button class="row-action" data-open-id="${n.id}" aria-label="Abrir aviso">···</button></td></tr>`;
   }).join('');
   $('#emptyState').hidden=rows.length>0;
   $('#rowCount').textContent=`Mostrando ${rows.length} de ${notices.length} avisos`;
@@ -271,7 +273,8 @@ async function changeStatus(id,status) {
 function showDetails(id) {
   const n=notices.find(x=>x.id===id);if(!n)return;
   const custom=Object.entries(n.custom_fields||{}).map(([k,v])=>`${fields.find(f=>f.field_key===k)?.label||k}: ${v}`).join('\n');
-  infoDialog('Detalle del aviso',`Cliente: ${n.customer_name}\nTeléfono: ${n.phone}\nCorreo: ${n.email||'—'}\nAparato: ${n.device||'—'}\nOrigen: ${landingName(n.landing_id)}\nEstado: ${statusLabel(n.status)}\nRecibido: ${formatDate(n.received_at)}\nLocalidad: ${n.locality||'—'}\nCódigo postal: ${n.postal_code||'—'}\nMarca: ${n.brand||'—'}\nAvería: ${n.issue||'—'}\n${custom}`);
+  const sourceLabel=n.created_by?'Teléfono':landingName(n.landing_id);
+  infoDialog('Detalle del aviso',`Cliente: ${n.customer_name}\nTeléfono: ${n.phone}\nCorreo: ${n.email||'—'}\nAparato: ${n.device||'—'}\nOrigen: ${sourceLabel}\nEstado: ${statusLabel(n.status)}\nRecibido: ${formatDate(n.received_at)}\nLocalidad: ${n.locality||'—'}\nCódigo postal: ${n.postal_code||'—'}\nMarca: ${n.brand||'—'}\nAvería: ${n.issue||'—'}\n${custom}`);
 }
 function setupDate(prefix) {
   const report=prefix==='report', select=$('#'+(report?'reportPeriod':'period'));
@@ -311,29 +314,33 @@ async function updateTariff(i,changes) {
 }
 async function renderFields() {
   const list=$('#fieldList');if(!list)return;
+  fieldEditorRows=fields.filter(f=>f.channel===fieldScope);
+  const title=$('#fieldEditorTitle');if(title)title.textContent=fieldScope==='phone'?'Campos de aviso por teléfono':'Campos del formulario por landing';
+  const description=$('#fieldEditorDescription');if(description)description.textContent=fieldScope==='phone'?'Configura los datos de los avisos que se reciben por teléfono.':'Configura los datos que recogen los formularios de las landing.';
+  const landingWrap=$('#newFieldLandingWrap');if(landingWrap)landingWrap.hidden=fieldScope==='phone';
   const typeNames={text:'Texto',phone:'Teléfono',email:'Correo',number:'Número',date:'Fecha',select:'Lista',textarea:'Texto largo',checkbox:'Casilla'};
-  list.innerHTML=fields.map((f,i)=>`<div class="field-row" style="grid-template-columns:minmax(125px,1fr) 100px auto auto auto auto auto;gap:6px"><input data-field-label="${i}" aria-label="Nombre del campo" value="${esc(f.label)}"/><select data-field-type="${i}" aria-label="Tipo de campo">${Object.entries(typeNames).map(([key,label])=>`<option value="${key}" ${f.field_type===key?'selected':''}>${label}</option>`).join('')}</select><label><input type="checkbox" data-field-required="${i}" ${f.required?'checked':''}/> Obligatorio</label><label><input type="checkbox" data-field-table="${i}" ${f.visible_in_table?'checked':''}/> Columna</label><label><input type="checkbox" data-field-form="${i}" ${f.visible_in_form?'checked':''}/> Formulario</label><small>${f.landing_id?esc(landingName(f.landing_id)):'Todas'}</small><button class="mini-delete" data-field-delete="${i}" aria-label="Eliminar campo">×</button></div>`).join('')||'<div class="empty">Todavía no hay campos configurados.</div>';
-  $$('[data-field-label]').forEach(x=>x.addEventListener('change',async e=>{const i=+e.target.dataset.fieldLabel,label=e.target.value.trim();if(!label){e.target.value=fields[i].label;return;}await saveField(i,{label});}));
-  $$('[data-field-type]').forEach(x=>x.addEventListener('change',async e=>{const i=+e.target.dataset.fieldType,field_type=e.target.value;let options=fields[i].options||[];if(field_type==='select'){const answer=await formDialog({title:'Opciones del campo',description:'Escribe las opciones separadas por comas.',fields:[{key:'options',label:'Opciones',type:'text',value:options.join(', '),required:true}]});if(!answer){renderFields();return;}options=answer.options.split(',').map(v=>v.trim()).filter(Boolean);}await saveField(i,{field_type,options});}));
+  list.innerHTML=fieldEditorRows.map((f,i)=>`<div class="field-row" style="grid-template-columns:minmax(125px,1fr) 100px auto auto auto auto auto;gap:6px"><input data-field-label="${i}" aria-label="Nombre del campo" value="${esc(f.label)}"/><select data-field-type="${i}" aria-label="Tipo de campo">${Object.entries(typeNames).map(([key,label])=>`<option value="${key}" ${f.field_type===key?'selected':''}>${label}</option>`).join('')}</select><label><input type="checkbox" data-field-required="${i}" ${f.required?'checked':''}/> Obligatorio</label><label><input type="checkbox" data-field-table="${i}" ${f.visible_in_table?'checked':''}/> Columna</label><label><input type="checkbox" data-field-form="${i}" ${f.visible_in_form?'checked':''}/> Formulario</label><small>${f.landing_id?esc(landingName(f.landing_id)):'Todas'}</small><button class="mini-delete" data-field-delete="${i}" aria-label="Eliminar campo">×</button></div>`).join('')||'<div class="empty">Todavía no hay campos configurados.</div>';
+  $$('[data-field-label]').forEach(x=>x.addEventListener('change',async e=>{const i=+e.target.dataset.fieldLabel,label=e.target.value.trim();if(!label){e.target.value=fieldEditorRows[i].label;return;}await saveField(i,{label});}));
+  $$('[data-field-type]').forEach(x=>x.addEventListener('change',async e=>{const i=+e.target.dataset.fieldType,field_type=e.target.value;let options=fieldEditorRows[i].options||[];if(field_type==='select'){const answer=await formDialog({title:'Opciones del campo',description:'Escribe las opciones separadas por comas.',fields:[{key:'options',label:'Opciones',type:'text',value:options.join(', '),required:true}]});if(!answer){renderFields();return;}options=answer.options.split(',').map(v=>v.trim()).filter(Boolean);}await saveField(i,{field_type,options});}));
   $$('[data-field-required]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldRequired,{required:e.target.checked})));
   $$('[data-field-table]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldTable,{visible_in_table:e.target.checked})));
   $$('[data-field-form]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldForm,{visible_in_form:e.target.checked})));
-  $$('[data-field-delete]').forEach(x=>x.addEventListener('click',async e=>{const f=fields[+e.target.dataset.fieldDelete];if(!await confirmDialog(`¿Eliminar el campo «${f.label}» de futuras entradas?`))return;const {error}=await db.from('notice_fields').delete().eq('id',f.id);if(error)toast(errorText(error),'Error');else{fields=fields.filter(x=>x.id!==f.id);renderFields();renderRows();renderExtraFields();}}));
+  $$('[data-field-delete]').forEach(x=>x.addEventListener('click',async e=>{const f=fieldEditorRows[+e.target.dataset.fieldDelete];if(!await confirmDialog(`¿Eliminar el campo «${f.label}» de futuras entradas?`))return;const {error}=await db.from('notice_fields').delete().eq('id',f.id);if(error)toast(errorText(error),'Error');else{fields=fields.filter(x=>x.id!==f.id);renderFields();renderRows();renderExtraFields();}}));
 }
 async function saveField(i,changes) {
-  const f=fields[i];const {data,error}=await db.from('notice_fields').update(changes).eq('id',f.id).select().single();
+  const f=fieldEditorRows[i];const {data,error}=await db.from('notice_fields').update(changes).eq('id',f.id).select().single();
   if(error){toast(errorText(error),'Campo no guardado');renderFields();return;}Object.assign(f,data);renderFields();renderRows();renderExtraFields();
 }
 function fieldsForLanding(landingId) {
-  const applicable=fields.filter(f=>!f.landing_id||f.landing_id===landingId);
+  const applicable=fields.filter(f=>f.channel==='landing'&&(!f.landing_id||f.landing_id===landingId));
   const byKey=new Map();for(const f of applicable){const current=byKey.get(f.field_key);if(!current||f.landing_id===landingId)byKey.set(f.field_key,f);}
   return [...byKey.values()].sort((a,b)=>a.position-b.position);
 }
+function fieldsForPhone() { return fields.filter(f=>f.channel==='phone'&&!f.landing_id).sort((a,b)=>a.position-b.position); }
 function renderExtraFields() {
   syncDefaultFields();
   const host=$('#extraNoticeFields');if(!host)return;
-  const landingId=$('#fLanding')?.value||null;
-  host.innerHTML=fieldsForLanding(landingId).filter(f=>f.visible_in_form&&!['customer_name','phone','locality','postal_code','device','brand','issue'].includes(f.field_key)).map(f=>{
+  host.innerHTML=fieldsForPhone().filter(f=>f.visible_in_form&&!['customer_name','phone','locality','postal_code','device','brand','issue'].includes(f.field_key)).map(f=>{
     const inputType={text:'text',phone:'tel',email:'email',number:'number',date:'date',select:'select',textarea:'textarea',checkbox:'checkbox'}[f.field_type]||'text';
     let field=inputType==='select'?'<select '+(f.required?'required':'')+'>'+['',...(f.options||[])].map(v=>`<option>${esc(v)}</option>`).join('')+'</select>':inputType==='textarea'?'<textarea '+(f.required?'required':'')+'></textarea>':`<input type="${inputType}" ${f.required?'required':''} ${inputType==='checkbox'?'value="true"':''}/>`;
     return `<label class="field custom-field-value" data-custom-key="${esc(f.field_key)}"><span>${esc(f.label)}</span>${field}</label>`;
@@ -343,7 +350,8 @@ function syncDefaultFields() {
   const map={name:'customer_name',phone:'phone',locality:'locality',postal:'postal_code',device:'device',brand:'brand',issue:'issue'};
   $$('[data-field-code]').forEach(el=>{
     const code=map[el.dataset.fieldCode]||el.dataset.fieldCode;
-    const field=fields.find(f=>f.field_key===code);
+    const sourceFields=noticeSource==='phone'?fieldsForPhone():fieldsForLanding($('#fLanding')?.value||null);
+    const field=sourceFields.find(f=>f.field_key===code);
     el.hidden=!!field&&!field.visible_in_form;
     if(field){const label=$('label',el);if(label)label.textContent=field.label;const control=$('input,select,textarea',el);if(control){control.required=field.required;if(field.field_type==='phone'&&control.tagName==='INPUT')control.type='tel';if(field.field_type==='email'&&control.tagName==='INPUT')control.type='email';if(field.field_type==='number'&&control.tagName==='INPUT')control.type='number';if(code==='device'&&control.tagName==='SELECT'&&field.options?.length)control.innerHTML=field.options.map(v=>`<option>${esc(v)}</option>`).join('');}}
   });
@@ -351,15 +359,20 @@ function syncDefaultFields() {
 async function createNotice(event) {
   event.preventDefault();
   const v=id=>$('#'+id).value.trim();
-  const device=v('fDevice'), landingId=v('fLanding'), custom_fields={};
+  const device=v('fDevice'), custom_fields={};
   $$('[data-custom-key]', $('#noticeForm')).forEach(el=>{const c=$('input,select,textarea',el);custom_fields[el.dataset.customKey]=c.type==='checkbox'?c.checked:c.value;});
-  const category=categoryFor(device), tariff=tariffs.find(t=>t.landing_id===landingId&&t.category===category);
-  const row={company_id:currentCompany.id,landing_id:landingId||null,status:'Nuevo',customer_name:v('fName'),phone:v('fPhone'),email:$('#fEmail')?.value?.trim()||null,locality:v('fLocality')||null,postal_code:v('fPostal')||null,device:device||null,category,brand:v('fBrand')||null,issue:v('fIssue')||null,custom_fields,unit_price:0,created_by:user.id};
+  const category=categoryFor(device);
+  const row={company_id:currentCompany.id,landing_id:null,status:'Nuevo',customer_name:v('fName'),phone:v('fPhone'),email:$('#fEmail')?.value?.trim()||null,locality:v('fLocality')||null,postal_code:v('fPostal')||null,device:device||null,category,brand:v('fBrand')||null,issue:v('fIssue')||null,custom_fields,unit_price:0,created_by:user.id};
   const {data,error}=await db.from('notices').insert(row).select().single();
   if(error){toast(errorText(error),'No se pudo guardar el aviso');return;}
   notices.unshift(data);$('#modal').classList.remove('open');event.target.reset();renderRows();
-  const landing=landingName(data.landing_id);toast(`Landing: ${landing} · ${data.device||'Aviso'} · ${formatDate(data.received_at)}`,'Nuevo aviso recibido');
+  toast(`Teléfono · ${data.device||'Aviso'} · ${formatDate(data.received_at)}`,'Nuevo aviso recibido');
   db.functions.invoke('notify-notice',{body:{notice_id:data.id}}).catch(()=>{});
+}
+function showSettingsTab(name) {
+  $$('[data-settings-tab]').forEach(button=>button.classList.toggle('active',button.dataset.settingsTab===name));
+  $$('[data-settings-panel]').forEach(panel=>panel.classList.toggle('active',panel.dataset.settingsPanel===name));
+  if(name==='fields')renderFields();
 }
 async function renderSettings() {
   if(!currentCompany)return;
@@ -480,8 +493,7 @@ function wireUI() {
   ['tableSearch','globalSearch'].forEach(id=>$('#'+id).addEventListener('input',renderRows));
   ['statusFilter','landingFilter','weekdayFilter'].forEach(id=>$('#'+id).addEventListener('change',renderRows));
   $('#reportWeekday').addEventListener('change',renderReport);
-  $('#newNotice').addEventListener('click',()=>{$('#fLanding').innerHTML=landingOptions();renderExtraFields();$('#modal').classList.add('open');$('#fName').focus();});
-  $('#fLanding').addEventListener('change',()=>{syncDefaultFields();renderExtraFields();});
+  $('#newNotice').addEventListener('click',()=>{syncDefaultFields();renderExtraFields();$('#modal').classList.add('open');$('#fName').focus();});
   $('#closeModal').addEventListener('click',()=>$('#modal').classList.remove('open'));
   $('#cancelModal').addEventListener('click',()=>$('#modal').classList.remove('open'));
   $('#modal').addEventListener('click',e=>{if(e.target.id==='modal')e.currentTarget.classList.remove('open');});
@@ -490,6 +502,8 @@ function wireUI() {
   $('#showToast').addEventListener('click',()=>toast('Los avisos nuevos aparecerán aquí al entrar desde una landing.','Notificaciones'));
   $('#exportBtn').addEventListener('click',()=>exportCsv(false));$('#reportExport').addEventListener('click',()=>exportCsv(true));
   $('#addField').addEventListener('click',addField);
+  $('#fieldScope').addEventListener('change',e=>{fieldScope=e.target.value;renderFields();});
+  $$('[data-settings-tab]').forEach(button=>button.addEventListener('click',()=>showSettingsTab(button.dataset.settingsTab)));
   $('#page-empresas .page-head .primary-btn').addEventListener('click',addCompany);
   $('#saveSettings').addEventListener('click',saveCompanySettings);
   $('#addPrice').addEventListener('click',addTariff);
@@ -499,8 +513,8 @@ async function addField() {
   const field_type=({Texto:'text',Número:'number',Fecha:'date',Lista:'select',Casilla:'checkbox'})[$('#newFieldType').value]||'text';
   const key=label.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
   let options=[];if(field_type==='select'){const answer=await formDialog({title:'Opciones del campo',description:'Escribe las opciones separadas por comas.',fields:[{key:'options',label:'Opciones',type:'text',required:true}]});if(!answer)return;options=answer.options.split(',').map(x=>x.trim()).filter(Boolean);}
-  const landing_id=$('#newFieldLanding')?.value||null;
-  const {data,error}=await db.from('notice_fields').insert({company_id:currentCompany.id,landing_id,field_key:key,label,field_type,options,required:false,visible_in_form:true,visible_in_table:true,position:fields.length+1}).select().single();
+  const landing_id=fieldScope==='landing'?($('#newFieldLanding')?.value||null):null;
+  const {data,error}=await db.from('notice_fields').insert({company_id:currentCompany.id,landing_id,channel:fieldScope,field_key:key,label,field_type,options,required:false,visible_in_form:true,visible_in_table:true,position:fieldEditorRows.length+1}).select().single();
   if(error){toast(errorText(error),'No se pudo añadir');return;}fields.push(data);$('#newFieldName').value='';renderFields();renderRows();renderExtraFields();
 }
 async function addTariff() {
