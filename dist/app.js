@@ -175,7 +175,7 @@ async function loadCompanyData() {
     ]);
     for(const r of results)if(r.error)throw r.error;
     [landings,notices,tariffs,fields,members]=results.map(r=>r.data||[]);
-    if(!fields.length){const seeds=defaultFields.map(f=>({...f,company_id:c}));const {data:createdFields,error}=await db.from('notice_fields').insert(seeds).select();if(error)throw error;fields=createdFields||[];}
+    if(!fields.length){const seeds=defaultFields.map(f=>({...f,options:f.options||[],company_id:c}));const {data:createdFields,error}=await db.from('notice_fields').insert(seeds).select();if(error)throw error;fields=createdFields||[];}
     if(!realtimeChannel){realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();toast(`Landing: ${landingName(payload.new.landing_id)} · ${payload.new.device||'Nuevo aviso'}`,'Nuevo aviso recibido');}}).subscribe();}
     else {await db.removeChannel(realtimeChannel);realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();toast(`Landing: ${landingName(payload.new.landing_id)} · ${payload.new.device||'Nuevo aviso'}`,'Nuevo aviso recibido');}}).subscribe();}
     $$('.demo-banner').forEach(el=>el.remove());setConnectionError('');
