@@ -31,7 +31,8 @@ function formDialog({title,description='',fields=[],confirmText='Guardar'}) {
     const controls=fields.map(f=>{
       const label=esc(f.label),key=esc(f.key),value=esc(f.value??''),required=f.required?'required':'';
       let control;
-      if(f.type==='select')control=`<select name="${key}" ${required}>${(f.options||[]).map(o=>{const v=typeof o==='string'?o:o.value,l=typeof o==='string'?o:o.label;return `<option value="${esc(v)}" ${String(v)===String(f.value??'')?'selected':''}>${esc(l)}</option>`;}).join('')}</select>`;
+      if(f.type==='action')control=`<button type="button" class="outline-btn" data-dialog-action="${key}">${label}</button>`;
+      else if(f.type==='select')control=`<select name="${key}" ${required}>${(f.options||[]).map(o=>{const v=typeof o==='string'?o:o.value,l=typeof o==='string'?o:o.label;return `<option value="${esc(v)}" ${String(v)===String(f.value??'')?'selected':''}>${esc(l)}</option>`;}).join('')}</select>`;
       else if(f.type==='search-select'){
         const options=(f.options||[]).map(o=>typeof o==='string'?{value:o,label:o}:o);
         const selected=options.find(o=>String(o.value)===String(f.value??''));
@@ -41,14 +42,16 @@ function formDialog({title,description='',fields=[],confirmText='Guardar'}) {
       else if(f.type==='checkbox')control=`<input name="${key}" type="checkbox" style="width:16px;height:16px;padding:0;margin:0;flex:0 0 16px;accent-color:var(--accent)" ${f.value?'checked':''} ${required}/>`;
       else if(f.type==='file')control=`<input name="${key}" type="file" accept="${esc(f.accept||'')}" ${required}/>`;
       else control=`<input name="${key}" type="${esc(f.type||'text')}" value="${value}" ${required} placeholder="${esc(f.placeholder||'')}" ${f.autocomplete?`autocomplete="${esc(f.autocomplete)}"`:''}/>`;
+      if(f.type==='action')return `<div class="field" style="margin:12px 0">${control}</div>`;
       if(f.type==='checkbox')return `<label class="field" style="display:flex;align-items:center;gap:9px;margin:12px 0">${control}<span style="margin:0">${label}</span></label>`;
       return `<label class="field" style="margin:12px 0"><span>${label}</span>${control}</label>`;
     }).join('');
     backdrop.innerHTML=`<form class="modal" style="max-height:90vh;overflow:auto" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>${esc(title)}</h2><p>${esc(description)}</p></div><button class="close" type="button" data-dialog-cancel aria-label="Cerrar">×</button></div>${controls}<div class="modal-actions"><button class="outline-btn" type="button" data-dialog-cancel>Cancelar</button><button class="primary-btn" type="submit">${esc(confirmText)}</button></div></form>`;
     const finish=value=>{backdrop.remove();resolve(value);};
     backdrop.addEventListener('click',e=>{const target=e.target;if(target===backdrop||(target instanceof Element&&target.closest('[data-dialog-cancel]'))){e.preventDefault();e.stopPropagation();finish(null);}});
-    $('form',backdrop).addEventListener('submit',e=>{e.preventDefault();const result={};for(const f of fields){const el=$('[name="'+CSS.escape(f.key)+'"]',backdrop);if(f.type==='search-select'&&!el.value){const search=$('[data-search-select-input="'+CSS.escape(f.key)+'"]',backdrop);search.setCustomValidity('Selecciona un cliente de la lista.');search.reportValidity();search.focus();return;}result[f.key]=f.type==='checkbox'?el.checked:f.type==='number'?Number(el.value):f.type==='file'?(el.files?.[0]||null):el.value;}finish(result);});
-    $$('[data-search-select-input]',backdrop).forEach(input=>{
+    $('form',backdrop).addEventListener('submit',e=>{e.preventDefault();const result={};for(const f of fields){if(f.type==='action')continue;const el=$('[name="'+CSS.escape(f.key)+'"]',backdrop);if(f.type==='search-select'&&!el.value){const search=$('[data-search-select-input="'+CSS.escape(f.key)+'"]',backdrop);search.setCustomValidity('Selecciona un cliente de la lista.');search.reportValidity();search.focus();return;}result[f.key]=f.type==='checkbox'?el.checked:f.type==='number'?Number(el.value):f.type==='file'?(el.files?.[0]||null):el.value;}finish(result);});
+    $('[data-dialog-action]',backdrop).forEach(button=>{const field=fields.find(f=>f.type==='action'&&f.key===button.dataset.dialogAction);button.addEventListener('click',()=>field?.onAction?.({backdrop}));});
+    $('[data-search-select-input]',backdrop).forEach(input=>{
       const key=input.dataset.searchSelectInput,hidden=$('[name="'+CSS.escape(key)+'"]',backdrop),results=$('[data-search-select-results="'+CSS.escape(key)+'"]',backdrop),options=(fields.find(f=>f.key===key)?.options||[]).map(o=>typeof o==='string'?{value:o,label:o}:o);
       const render=()=>{
         const query=input.value.trim().toLocaleLowerCase();
@@ -1413,6 +1416,7 @@ async function openAppointmentDialog(existing=null,overrides={}) {
       {key:'appointment_type',label:'Tipo',type:'select',value:freeType,options:[{value:'Cita libre',label:'Cita libre'},{value:'Asuntos personales',label:'Asuntos personales'}]},
       {key:'start_at',label:'Fecha y hora',type:'datetime-local',value:localDateTimeValue(startDefault),required:true},
       {key:'duration_minutes',label:'Duración en minutos',type:'number',value:source.duration_minutes||60,required:true},
+      {key:'available_slots',label:'Ver huecos libres',type:'action',onAction:({backdrop})=>openFreeSlotsDialog(backdrop,source.id)},
       {key:'address',label:'Lugar o dirección (opcional)',type:'text',value:source.address||''},
       {key:'notes',label:'Notas',type:'textarea',value:source.notes||''},
       {key:'status',label:'Estado',type:'select',value:overrides.status||((source.status==='cancelled')?'scheduled':source.status||'scheduled'),options:[{value:'scheduled',label:'Programada'},{value:'completed',label:'Realizada'}]}
@@ -1420,6 +1424,7 @@ async function openAppointmentDialog(existing=null,overrides={}) {
       {key:'notice_id',label:'Buscar por nombre, teléfono o dirección',type:'search-select',value:requestedId,required:true,placeholder:'Escribe el nombre, teléfono o dirección',options:eligible.map(n=>({value:n.id,label:agendaNoticeLabel(n)}))},
       {key:'start_at',label:'Fecha y hora',type:'datetime-local',value:localDateTimeValue(startDefault),required:true},
       {key:'duration_minutes',label:'Duración en minutos',type:'number',value:source.duration_minutes||60,required:true},
+      {key:'available_slots',label:'Ver huecos libres',type:'action',onAction:({backdrop})=>openFreeSlotsDialog(backdrop,source.id)},
       {key:'notes',label:'Notas para el técnico',type:'textarea',value:source.notes||''},
       {key:'status',label:'Estado',type:'select',value:overrides.status||((source.status==='cancelled')?'scheduled':source.status||'scheduled'),options:[{value:'scheduled',label:'Programada'},{value:'completed',label:'Realizada'}]}
     ];
@@ -1466,6 +1471,33 @@ async function openAppointmentDialog(existing=null,overrides={}) {
 }
 function defaultAppointmentStart() {
   const date=new Date();date.setMinutes(0,0,0);date.setHours(date.getHours()+1);return date;
+}
+function openFreeSlotsDialog(parentBackdrop,ignoreAppointmentId=null) {
+  const parentStart=$('[name="start_at"]',parentBackdrop),durationInput=$('[name="duration_minutes"]',parentBackdrop);
+  const duration=Math.max(15,Math.min(480,Number(durationInput?.value)||60));
+  const initialDate=parentStart?.value?.slice(0,10)||agendaSelectedDate||localDateKey(new Date());
+  const backdrop=document.createElement('div');backdrop.className='modal-backdrop open';
+  const highest=[...document.querySelectorAll('.modal-backdrop')].reduce((max,el)=>Math.max(max,Number(el.style.zIndex)||0),110);backdrop.style.zIndex=String(highest+10);
+  backdrop.innerHTML=`<section class="modal" role="dialog" aria-modal="true" style="max-height:88vh;overflow:auto"><div class="modal-head"><div><h2>Huecos libres</h2><p>Selecciona una fecha y elige una hora disponible entre las 08:00 y las 20:00.</p></div><button type="button" class="close" data-free-slots-close aria-label="Cerrar">×</button></div><label class="field"><span>Fecha</span><input type="date" data-free-slots-date value="${esc(initialDate)}"/></label><p style="font-size:12px;color:#778398">Duración de la cita: ${duration} minutos</p><div data-free-slots-list style="display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px"></div><div class="modal-actions"><button type="button" class="outline-btn" data-free-slots-close>Cerrar</button></div></section>`;
+  const dateInput=$('[data-free-slots-date]',backdrop),list=$('[data-free-slots-list]',backdrop);
+  const render=()=>{
+    const dateKey=dateInput.value;
+    const dayAppointments=appointments.filter(a=>a.id!==ignoreAppointmentId&&a.status!=='cancelled'&&localDateKey(a.start_at)===dateKey);
+    const slots=[];
+    for(let minutes=8*60;minutes+duration<=20*60;minutes+=30){
+      const start=new Date(dateKey+'T'+String(Math.floor(minutes/60)).padStart(2,'0')+':'+String(minutes%60).padStart(2,'0')+':00');
+      if(!Number.isFinite(start.getTime())||(dateKey===localDateKey(new Date())&&start<=new Date()))continue;
+      const end=new Date(start.getTime()+duration*60000);
+      const overlaps=dayAppointments.some(a=>{const busyStart=new Date(a.start_at),busyEnd=new Date(busyStart.getTime()+(Number(a.duration_minutes)||60)*60000);return start<busyEnd&&end>busyStart;});
+      if(!overlaps)slots.push({start,label:appointmentTime(start.toISOString())});
+    }
+    list.innerHTML=slots.length?slots.map(slot=>'<button type="button" class="outline-btn" data-free-slot="'+slot.start.toISOString()+'">'+slot.label+'</button>').join(''):'<p class="empty" style="grid-column:1/-1">No quedan huecos libres para esa fecha con esta duración.</p>';
+  };
+  dateInput.addEventListener('change',render);
+  list.addEventListener('click',event=>{const button=event.target.closest('[data-free-slot]');if(!button)return;if(parentStart){parentStart.value=localDateTimeValue(new Date(button.dataset.freeSlot));parentStart.dispatchEvent(new Event('input',{bubbles:true}));parentStart.dispatchEvent(new Event('change',{bubbles:true}));}backdrop.remove();});
+  $('[data-free-slots-close]',backdrop).forEach(button=>button.addEventListener('click',()=>backdrop.remove()));
+  backdrop.addEventListener('click',event=>{if(event.target===backdrop)backdrop.remove();});
+  document.body.append(backdrop);render();
 }
 async function setAppointmentStatus(id,status) {
   const appointment=appointments.find(a=>a.id===id);if(!appointment)return;
