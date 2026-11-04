@@ -730,7 +730,7 @@ function openPendingNotices(status='Nuevo') {
     if(saveButton||scheduleButton){
       const notice=notices.find(item=>item.id===id);
       if(!notice||!canManageCurrentNotices())return;
-      const status=backdrop.dataset.pendingResult||notice.status||'Nuevo';
+      const status=canonicalNoticeStatus($('[data-pending-result]',host)?.value||notice.status||'Nuevo');
       if(scheduleButton&&status==='No sale')return;
       const effectiveStatus=scheduleButton?'Sale':status;
       let reason=null;
@@ -796,6 +796,8 @@ function renderPendingNoticeDetail(backdrop,id) {
     +(n.status==='No sale'?pendingDetailRow('Motivo por el que no salió',n.management_reason||'Motivo no indicado',true):'')+extras
     +'</div>'+resultControl+resultActions
     +(canManage?'':'<p class="pending-hint">Tu perfil puede consultar los datos, pero no cambiar el estado.</p>');
+  const resultSelect=$('[data-pending-result]',host);
+  if(resultSelect)resultSelect.addEventListener('change',()=>{backdrop.dataset.pendingResult=resultSelect.value;const schedule=$('[data-pending-schedule]',host);if(schedule)schedule.hidden=resultSelect.value==='No sale';});
 }
 function setupDate(prefix) {
   const report=prefix==='report', select=$('#'+(report?'reportPeriod':'period'));
