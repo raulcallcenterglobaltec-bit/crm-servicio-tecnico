@@ -335,7 +335,7 @@ function renderLandingOptions() {
   const fieldLanding=$('#newFieldLanding');if(fieldLanding){const chosen=fieldLanding.value;fieldLanding.innerHTML=landingChoices;fieldLanding.value=chosen;}
   const fieldFilter=$('#fieldLandingFilter');if(fieldFilter){const chosen=fieldFilter.value;fieldFilter.innerHTML='<option value="">Campos generales (todas las landings)</option>'+landings.filter(l=>l.is_active).map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');fieldFilter.value=chosen;}
 }
-function statusLabel(s) { return s==='Sale'?'Aviso Sacado':s==='No sale'?'Aviso no sacado':s==='Nuevo'?'Nuevo':'—'; }
+function statusLabel(s) { return s==='Sale'?'Aviso Sacado':s==='No sale'?'Aviso no sacado':s==='Nuevo'?'Pendiente de localizar':'—'; }
 function statusClass(s) { return s==='Sale'?'sold':s==='No sale'?'lost':'new'; }
 function getUnitPrice(n) {
   if(n.status==='Sale')return Number(n.unit_price||0);
@@ -580,7 +580,7 @@ async function changeStatus(id,status,managementReason=null) {
   if(!canManageCurrentNotices())return false;
   const n=notices.find(x=>x.id===id);if(!n)return false;
   status=canonicalNoticeStatus(status);
-  if(!status){toast('Selecciona Pendiente, Aviso sacado o Aviso no sacado.','Resultado no válido');return false;}
+  if(!status){toast('Selecciona Pendiente de localizar, Aviso sacado o Aviso no sacado.','Resultado no válido');return false;}
   const wasSale=n.status==='Sale';
   const tariff=tariffForNotice(n);
   const patch={status,managed_at:status==='Nuevo'?null:new Date().toISOString(),unit_price:status==='Sale'?Number(tariff?.price||0):0,management_reason:status==='No sale'?managementReason:null};
@@ -715,7 +715,7 @@ function openPendingNotices(status='Nuevo') {
   const host=$('.pending-content',backdrop);
     host.addEventListener('click',async e=>{
     const resultOption=e.target.closest('[data-pending-result-option]');
-    if(resultOption){const value=resultOption.dataset.pendingResultOption;backdrop.dataset.pendingResult=value;const label=$('[data-pending-result-label]',host);if(label)label.textContent=value==='Sale'?'Aviso sacado':value==='No sale'?'Aviso no sacado':'Pendiente';const menu=$('[data-pending-result-menu]',host);if(menu)menu.hidden=true;const trigger=$('[data-pending-result-trigger]',host);if(trigger)trigger.setAttribute('aria-expanded','false');const schedule=$('[data-pending-schedule]',host);if(schedule)schedule.hidden=value==='No sale';return;}
+    if(resultOption){const value=resultOption.dataset.pendingResultOption;backdrop.dataset.pendingResult=value;const label=$('[data-pending-result-label]',host);if(label)label.textContent=value==='Sale'?'Aviso sacado':value==='No sale'?'Aviso no sacado':'Pendiente de localizar';const menu=$('[data-pending-result-menu]',host);if(menu)menu.hidden=true;const trigger=$('[data-pending-result-trigger]',host);if(trigger)trigger.setAttribute('aria-expanded','false');const schedule=$('[data-pending-schedule]',host);if(schedule)schedule.hidden=value==='No sale';return;}
     const resultTrigger=e.target.closest('[data-pending-result-trigger]');
     if(resultTrigger){const menu=$('[data-pending-result-menu]',host);if(menu){menu.hidden=!menu.hidden;resultTrigger.setAttribute('aria-expanded',String(!menu.hidden));}return;}
     const open=e.target.closest('[data-pending-open]');
@@ -745,7 +745,7 @@ function openPendingNotices(status='Nuevo') {
       const saved=await changeStatus(id,effectiveStatus,reason);
       if(saved){
         if(scheduleButton){close();toast('Aviso sacado. Puedes completar la cita.','Aviso actualizado');await openAppointmentDialog(null,{notice_id:id});}
-        else {toast(status==='Sale'?'Aviso marcado como sacado.':status==='No sale'?'Aviso marcado como no sacado.':'Aviso guardado como pendiente.','Gestión actualizada');if(backdrop.isConnected)renderPendingNoticeList(backdrop);}
+        else {toast(status==='Sale'?'Aviso marcado como sacado.':status==='No sale'?'Aviso marcado como no sacado.':'Aviso guardado como pendiente de localizar.','Gestión actualizada');if(backdrop.isConnected)renderPendingNoticeList(backdrop);}
       } else if(backdrop.isConnected)renderPendingNoticeDetail(backdrop,id);
       return;
     }
@@ -785,8 +785,8 @@ function renderPendingNoticeDetail(backdrop,id) {
   const extras=Object.entries(n.custom_fields||{}).filter(([key])=>!['customer_name','phone','email','locality','postal_code','device','brand','issue'].includes(key)).map(([key,value])=>pendingDetailRow(fields.find(f=>f.field_key===key)?.label||key,value,false)).join('');
   const canManage=canManageCurrentNotices();
   const selectedResult=n.status==='Sale'?'Sale':n.status==='No sale'?'No sale':'Nuevo';
-  const selectedResultLabel=selectedResult==='Sale'?'Aviso sacado':selectedResult==='No sale'?'Aviso no sacado':'Pendiente';
-  const resultControl='<div class="pending-result-select field"><span>Resultado de la llamada</span><div style="position:relative"><button type="button" class="outline-btn" data-pending-result-trigger aria-expanded="false" '+(canManage?'':'disabled')+' style="width:100%;display:flex;justify-content:space-between;align-items:center;text-align:left"><span data-pending-result-label>'+selectedResultLabel+'</span><span aria-hidden="true">▾</span></button><div data-pending-result-menu hidden style="position:absolute;z-index:5;bottom:calc(100% + 4px);left:0;right:0;background:#fff;border:1px solid #e5e9f1;border-radius:8px;box-shadow:0 8px 20px rgba(24,34,53,.14);padding:4px">'+[['Nuevo','Pendiente'],['Sale','Aviso sacado'],['No sale','Aviso no sacado']].map(([value,label])=>'<button type="button" data-pending-result-option="'+value+'" '+(canManage?'':'disabled')+' style="display:block;width:100%;border:0;background:#fff;text-align:left;padding:9px 10px;border-radius:6px;color:#536077;cursor:pointer">'+label+'</button>').join('')+'</div></div></div>';
+  const selectedResultLabel=selectedResult==='Sale'?'Aviso sacado':selectedResult==='No sale'?'Aviso no sacado':'Pendiente de localizar';
+  const resultControl='<div class="pending-result-select field"><span>Resultado de la llamada</span><div style="position:relative"><button type="button" class="outline-btn" data-pending-result-trigger aria-expanded="false" '+(canManage?'':'disabled')+' style="width:100%;display:flex;justify-content:space-between;align-items:center;text-align:left"><span data-pending-result-label>'+selectedResultLabel+'</span><span aria-hidden="true">▾</span></button><div data-pending-result-menu hidden style="position:absolute;z-index:5;bottom:calc(100% + 4px);left:0;right:0;background:#fff;border:1px solid #e5e9f1;border-radius:8px;box-shadow:0 8px 20px rgba(24,34,53,.14);padding:4px">'+[['Nuevo','Pendiente de localizar'],['Sale','Aviso sacado'],['No sale','Aviso no sacado']].map(([value,label])=>'<button type="button" data-pending-result-option="'+value+'" '+(canManage?'':'disabled')+' style="display:block;width:100%;border:0;background:#fff;text-align:left;padding:9px 10px;border-radius:6px;color:#536077;cursor:pointer">'+label+'</button>').join('')+'</div></div></div>';
   const resultActions='<div class="pending-status-actions"><button type="button" class="outline-btn" data-pending-save '+(canManage?'':'disabled')+'>Guardar aviso</button><button type="button" class="primary-btn" data-pending-schedule '+(n.status!=='No sale'&&canManage?'':'hidden')+' '+(canManage?'':'disabled')+'>Guardar y agendar</button></div>';
   host.innerHTML='<button type="button" class="pending-back" data-pending-back>‹ Volver a avisos</button><div class="pending-detail-grid">'
     +pendingDetailRow('Cliente',n.customer_name,false)+pendingDetailRow('Teléfono',n.phone,false)
@@ -830,8 +830,8 @@ function renderReport() {
   $('#reportRevenue').textContent=money(revenue);$('#reportTotal').textContent=rows.length;
   $('#reportBestLanding').textContent=best?.total?best.landing.name:'—';$('#reportBestDetail').textContent=best?.total?`${best.total} avisos · ${best.sold} Avisos Sacados`:'0 avisos sacados';
   $('#reportLandingResults').innerHTML=groups.filter(g=>g.total>0).map(g=>`<div class="placeholder-tile"><strong>${esc(g.landing.name)}</strong><small>${g.total} avisos · ${g.sold} Avisos Sacados · ${g.lost} Avisos Nulos</small></div>`).join('')||'<div class="empty">No hay avisos de formulario en este filtro.</div>';
-  $('#reportPhoneResults').innerHTML=sourceCard('Avisos telefónicos',phoneRows,['Pendiente','Aviso Sacado','Aviso no sacado'],'Conversión de gestionados');
-  $('#reportComplaintResults').innerHTML=sourceCard('Reclamaciones',complaintRows,['Pendiente','Envío solicitado','Cliente equivocado'],'Envío solicitado')+sourceCard('Anulaciones',cancellationRows,['Pendiente','Envío solicitado','Cliente equivocado'],'Envío solicitado');
+  $('#reportPhoneResults').innerHTML=sourceCard('Avisos telefónicos',phoneRows,['Pendiente de localizar','Aviso Sacado','Aviso no sacado'],'Conversión de gestionados');
+  $('#reportComplaintResults').innerHTML=sourceCard('Reclamaciones',complaintRows,['Pendiente de localizar','Envío solicitado','Cliente equivocado'],'Envío solicitado')+sourceCard('Anulaciones',cancellationRows,['Pendiente','Envío solicitado','Cliente equivocado'],'Envío solicitado');
   const totals=new Map();sold.forEach(n=>{const origin=n.landing_id?landingName(n.landing_id):`Teléfono · ${n.locality||'Ciudad sin indicar'}`;const k=`${origin} · ${n.category||'Sin categoría'}`,v=totals.get(k)||{amount:0,count:0};v.amount+=Number(n.unit_price||0);v.count++;totals.set(k,v);});
   $('#reportPriceRows').innerHTML=[...totals].sort((a,b)=>b[1].amount-a[1].amount).map(([label,v])=>`<div style="display:flex;justify-content:space-between;border-bottom:1px solid #f0f1f5;padding:8px 0;font-size:11px"><span>${esc(label)} <small>(${v.count})</small></span><strong>${money(v.amount)}</strong></div>`).join('')||'<div class="empty">No hay avisos sacados en este filtro.</div>';
 }
@@ -979,7 +979,7 @@ function updateRecordFormMode() {
     status.value=previous==='Sale'||previous==='No sale'?previous:(relatedNoticeMatch?'Sale':'No sale');
   } else if(status&&statusLabel){
     statusLabel.textContent='Resultado del aviso';
-    status.innerHTML='<option value="Nuevo">Pendiente</option><option value="Sale">Aviso Sacado</option><option value="No sale">Aviso no sacado</option>';
+    status.innerHTML='<option value="Nuevo">Pendiente de localizar</option><option value="Sale">Aviso Sacado</option><option value="No sale">Aviso no sacado</option>';
     status.value='Nuevo';
   }
   const deviceField=$('[data-field-code="device"]'),brandField=$('[data-field-code="brand"]'),issueField=$('[data-field-code="issue"]');
