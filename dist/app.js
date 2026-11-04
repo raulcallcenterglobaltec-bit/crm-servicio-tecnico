@@ -34,6 +34,7 @@ function formDialog({title,description='',fields=[],confirmText='Guardar'}) {
       if(f.type==='select')control=`<select name="${key}" ${required}>${(f.options||[]).map(o=>{const v=typeof o==='string'?o:o.value,l=typeof o==='string'?o:o.label;return `<option value="${esc(v)}" ${String(v)===String(f.value??'')?'selected':''}>${esc(l)}</option>`;}).join('')}</select>`;
       else if(f.type==='textarea')control=`<textarea name="${key}" rows="3" ${required} placeholder="${esc(f.placeholder||'')}">${value}</textarea>`;
       else if(f.type==='checkbox')control=`<input name="${key}" type="checkbox" style="width:16px;height:16px;padding:0;margin:0;flex:0 0 16px;accent-color:var(--accent)" ${f.value?'checked':''} ${required}/>`;
+      else if(f.type==='file')control=`<input name="${key}" type="file" accept="${esc(f.accept||'')}" ${required}/>`;
       else control=`<input name="${key}" type="${esc(f.type||'text')}" value="${value}" ${required} placeholder="${esc(f.placeholder||'')}" ${f.autocomplete?`autocomplete="${esc(f.autocomplete)}"`:''}/>`;
       if(f.type==='checkbox')return `<label class="field" style="display:flex;align-items:center;gap:9px;margin:12px 0">${control}<span style="margin:0">${label}</span></label>`;
       return `<label class="field" style="margin:12px 0"><span>${label}</span>${control}</label>`;
@@ -41,7 +42,7 @@ function formDialog({title,description='',fields=[],confirmText='Guardar'}) {
     backdrop.innerHTML=`<form class="modal" style="max-height:90vh;overflow:auto" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>${esc(title)}</h2><p>${esc(description)}</p></div><button class="close" type="button" data-dialog-cancel aria-label="Cerrar">×</button></div>${controls}<div class="modal-actions"><button class="outline-btn" type="button" data-dialog-cancel>Cancelar</button><button class="primary-btn" type="submit">${esc(confirmText)}</button></div></form>`;
     const finish=value=>{backdrop.remove();resolve(value);};
     backdrop.addEventListener('click',e=>{const target=e.target;if(target===backdrop||(target instanceof Element&&target.closest('[data-dialog-cancel]'))){e.preventDefault();e.stopPropagation();finish(null);}});
-    $('form',backdrop).addEventListener('submit',e=>{e.preventDefault();const result={};for(const f of fields){const el=$('[name="'+CSS.escape(f.key)+'"]',backdrop);result[f.key]=f.type==='checkbox'?el.checked:f.type==='number'?Number(el.value):el.value;}finish(result);});
+    $('form',backdrop).addEventListener('submit',e=>{e.preventDefault();const result={};for(const f of fields){const el=$('[name="'+CSS.escape(f.key)+'"]',backdrop);result[f.key]=f.type==='checkbox'?el.checked:f.type==='number'?Number(el.value):f.type==='file'?(el.files?.[0]||null):el.value;}finish(result);});
     document.body.append(backdrop);$('[name]',backdrop)?.focus();
   });
 }
@@ -452,8 +453,22 @@ function renderComplaints() {
   const rows=notices.filter(n=>n.notice_type==='reclamacion'||n.notice_type==='anulacion').sort((a,b)=>new Date(b.received_at)-new Date(a.received_at));
   $('#complaintCount').textContent=`${rows.length} ${rows.length===1?'registro':'registros'}`;
   $('#complaintEmpty').hidden=rows.length>0;
-  body.innerHTML=rows.map(n=>`<tr><td>${esc(formatDate(n.received_at))}</td><td><div class="client-cell"><span class="client-initial">${esc((n.customer_name||'??').slice(0,2).toUpperCase())}</span><div><strong>${esc(n.customer_name||'Sin nombre')}</strong><small>${esc(n.locality||'')}</small></div></div></td><td>${esc(n.phone||'—')}</td><td><span class="source">${n.notice_type==='anulacion'?'Anulación':'Reclamación'}</span></td><td class="complaint-detail">${esc(n.issue||'—')}</td><td>${n.status==='Sale'?'Envío solicitado':n.status==='No sale'?'No es nuestra (cliente equivocado)':'Registro anterior'}</td><td><button class="row-action" data-complaint-detail="${esc(n.id)}" aria-label="Ver datos">···</button></td></tr>`).join('');
+  body.innerHTML=rows.map(n=>`<tr><td>${esc(formatDate(n.received_at))}</td><td><div class="client-cell"><span class="client-initial">${esc((n.customer_name||'??').slice(0,2).toUpperCase())}</span><div><strong>${esc(n.customer_name||'Sin nombre')}</strong><small>${esc(n.locality||'')}</small></div></div></td><td>${esc(n.phone||'—')}</td><td><span class="source">${n.notice_type==='anulacion'?'Anulación':'Reclamación'}</span></td><td class="complaint-detail">${esc(n.issue||'—')}</td><td>${n.status==='Sale'?'Envío solicitado':n.status==='No sale'?'No es nuestra (cliente equivocado)':'Registro anterior'}</td><td><div class="notice-row-actions"><button class="row-action" data-complaint-detail="${esc(n.id)}" aria-label="Ver datos" title="Ver datos">···</button>${isSuperAdmin&&n.notice_type==='reclamacion'?`<button class="row-action notice-delete" data-delete-complaint="${esc(n.id)}" aria-label="Eliminar reclamación" title="Eliminar reclamación">×</button>`:''}</div></td></tr>`).join('');
   $$('[data-complaint-detail]',body).forEach(button=>button.onclick=()=>showDetails(button.dataset.complaintDetail));
+  $$('[data-delete-complaint]',body).forEach(button=>button.onclick=()=>deleteComplaint(button.dataset.deleteComplaint));
+}
+async function deleteComplaint(id){
+  if(!isSuperAdmin)return false;
+  const complaint=notices.find(item=>item.id===id&&item.notice_type==='reclamacion');if(!complaint)return false;
+  const name=complaint.customer_name||'esta reclamación';
+  if(!await confirmDialog('Se eliminará definitivamente la reclamación de '+name+'. Esta acción no se puede deshacer.'))return false;
+  const {data,error}=await db.from('notices').delete().eq('id',id).eq('notice_type','reclamacion').select('id');
+  if(error){toast(errorText(error),'No se pudo eliminar');return false;}
+  if(!data?.length){toast('No se encontró la reclamación o tu sesión no tiene permiso.','No se pudo eliminar');return false;}
+  notices=notices.filter(item=>item.id!==id);
+  renderComplaints();renderClientHistory();
+  toast('La reclamación se ha eliminado definitivamente.','Reclamación eliminada');
+  return true;
 }
 function historyCustomerKey(row) {
   const phone=normalizePhoneForMatch(row.phone);
@@ -988,12 +1003,57 @@ async function addCompany() {
   } catch(error) { toast(errorText(error),'No se pudo crear la empresa'); }
   finally { if(button)button.disabled=false; }
 }
+async function openCompanyDetails(companyId) {
+  const company=companies.find(c=>c.id===companyId);if(!company)return;
+  const answer=await formDialog({title:'Datos de la empresa',description:'Consulta o actualiza los datos generales y el logo.',fields:[
+    {key:'name',label:'Nombre de la empresa',value:company.name,required:true},
+    {key:'administrator_name',label:'Administrador o representante',value:company.administrator_name||''},
+    {key:'tax_id',label:'CIF / NIF',value:company.tax_id||''},
+    {key:'address',label:'Dirección',type:'textarea',value:company.address||''},
+    {key:'postal_code',label:'Código postal',value:company.postal_code||''},
+    {key:'city',label:'Localidad',value:company.city||''},
+    {key:'province',label:'Provincia',value:company.province||''},
+    {key:'contact_email',label:'Correo electrónico',type:'email',value:company.contact_email||''},
+    {key:'contact_phone',label:'Teléfono',type:'tel',value:company.contact_phone||''},
+    {key:'logo_file',label:'Logo de la empresa (PNG, JPG, WEBP o SVG; máximo 2 MB)',type:'file',accept:'image/png,image/jpeg,image/webp,image/svg+xml'}
+  ]});
+  if(!answer)return;
+  const file=answer.logo_file;
+  if(file&&(file.size>2*1024*1024||!/^image\/(png|jpeg|webp|svg\+xml)$/.test(file.type))){toast('El logo debe ser PNG, JPG, WEBP o SVG y no superar 2 MB.','Archivo no válido');return;}
+  const payload={
+    name:answer.name.trim(),
+    administrator_name:answer.administrator_name.trim()||null,
+    tax_id:answer.tax_id.trim()||null,
+    address:answer.address.trim()||null,
+    postal_code:answer.postal_code.trim()||null,
+    city:answer.city.trim()||null,
+    province:answer.province.trim()||null,
+    contact_email:answer.contact_email.trim()||null,
+    contact_phone:answer.contact_phone.trim()||null
+  };
+  if(file){
+    const ext=({jpeg:'jpg','svg+xml':'svg'}[file.type.split('/')[1]]||file.type.split('/')[1]);
+    const path=company.id+'/logo-'+Date.now()+'.'+ext;
+    const {error:uploadError}=await db.storage.from('company-logos').upload(path,file,{upsert:true,contentType:file.type});
+    if(uploadError){toast(errorText(uploadError),'No se pudo subir el logo');return;}
+    payload.logo_path=db.storage.from('company-logos').getPublicUrl(path).data.publicUrl;
+  }
+  const {data,error}=await db.from('companies').update(payload).eq('id',company.id).select().single();
+  if(error){toast(errorText(error),'No se pudieron guardar los datos');return;}
+  Object.assign(company,data);
+  if(currentCompany?.id===company.id){
+    Object.assign(currentCompany,data);
+    renderCompanyPicker();renderSettings();
+  }
+  renderCompanyPage();
+  toast('Datos de la empresa guardados.');
+}
 function renderCompanyPage() {
   if(!isSuperAdmin)return;
   const section=$('#page-empresas');if(!section)return;
   let grid=$('.simple-grid',section);if(!grid)return;
-  grid.innerHTML=companies.map(c=>`<div class="placeholder-tile" style="display:flex;align-items:center;justify-content:space-between;gap:12px"><button type="button" data-company-card="${c.id}" style="flex:1;text-align:left;border:0;background:transparent;color:inherit;padding:0;cursor:pointer"><span class="company-badge">${esc(c.name.slice(0,2).toUpperCase())}</span><strong>${esc(c.name)}</strong><small>${c.id===currentCompany?.id?'Empresa actual':'Cambiar a esta empresa'}</small></button><button type="button" class="mini-delete" data-delete-company="${c.id}" aria-label="Eliminar empresa ${esc(c.name)}" title="Eliminar empresa">×</button></div>`).join('')||'<div class="empty">Crea tu primera empresa.</div>';
-  $$('[data-company-card]',grid).forEach(b=>b.onclick=()=>{currentCompany=companies.find(c=>c.id===b.dataset.companyCard);renderCompanyPicker();loadCompanyData();});
+  grid.innerHTML=companies.map(c=>`<div class="placeholder-tile" style="display:flex;align-items:center;justify-content:space-between;gap:12px"><button type="button" data-company-card="${c.id}" style="flex:1;text-align:left;border:0;background:transparent;color:inherit;padding:0;cursor:pointer;display:flex;align-items:center;gap:12px"><span class="company-badge" style="width:52px;height:52px;flex:0 0 52px;display:grid;place-items:center;overflow:hidden">${c.logo_path?`<img src="${esc(c.logo_path)}" alt="Logo de ${esc(c.name)}" style="width:100%;height:100%;object-fit:contain;background:#fff;border-radius:inherit;padding:3px"/>`:esc(c.name.slice(0,2).toUpperCase())}</span><span style="display:grid;gap:5px;text-align:left"><strong>${esc(c.name)}</strong><small>${c.id===currentCompany?.id?'Empresa actual · Ver o editar datos':'Ver o editar datos'}</small></span></button><button type="button" class="mini-delete" data-delete-company="${c.id}" aria-label="Eliminar empresa ${esc(c.name)}" title="Eliminar empresa">×</button></div>`).join('')||'<div class="empty">Crea tu primera empresa.</div>';
+  $('[data-company-card]',grid).forEach(b=>b.onclick=()=>openCompanyDetails(b.dataset.companyCard));
   $$('[data-delete-company]',grid).forEach(b=>b.onclick=async()=>{
     const company=companies.find(c=>c.id===b.dataset.deleteCompany);if(!company)return;
     const confirmed=await confirmDialog(`¿Eliminar la empresa «${company.name}»? Se borrarán definitivamente sus avisos, landings, campos, tarifas, usuarios e integraciones. Esta acción no se puede deshacer.`);
