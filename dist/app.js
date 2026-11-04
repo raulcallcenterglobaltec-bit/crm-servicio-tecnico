@@ -741,14 +741,33 @@ function renderReport() {
 function renderPriceRules() {
   const body=$('#priceRows');if(!body)return;
   const cityBody=$('#phonePriceRows');
-  body.innerHTML=tariffs.map((t,i)=>(t.scope||'landing')==='landing'?`<tr><td><select data-tariff-landing="${i}">${landings.map(l=>`<option value="${l.id}" ${l.id===t.landing_id?'selected':''}>${esc(l.name)}</option>`).join('')}</select></td><td><select data-tariff-category="${i}">${['Gama blanca','Clima'].map(c=>`<option ${c===t.category?'selected':''}>${c}</option>`).join('')}</select></td><td><input type="number" min="0" step="0.01" value="${t.price}" data-tariff-price="${i}"/></td><td><button class="mini-delete" data-tariff-delete="${i}" aria-label="Eliminar tarifa">×</button></td></tr>`:'').join('')||'<tr><td colspan="4" class="empty">Todavía no hay tarifas por landing.</td></tr>';
+  const categories=['Gama blanca','Clima'];
+  body.innerHTML=landings.map(landing=>categories.map((category,index)=>{
+    const tariff=tariffs.find(t=>(t.scope||'landing')==='landing'&&t.landing_id===landing.id&&t.category===category);
+    return `<tr>${index===0?`<td rowspan="2">${esc(landing.name)}</td>`:''}<td>${esc(category)}</td><td><input type="number" min="0" step="0.01" value="${Number(tariff?.price||0)}" data-landing-tariff-price="${landing.id}" data-landing-tariff-category="${esc(category)}" aria-label="Precio de ${esc(category)} para ${esc(landing.name)}"/></td></tr>`;
+  }).join('')).join('')||'<tr><td colspan="3" class="empty">Todavía no hay landings. Añade una landing para configurar sus tarifas.</td></tr>';
   if(cityBody)cityBody.innerHTML=tariffs.map((t,i)=>t.scope==='phone'?`<tr><td><input type="text" value="${esc(t.locality)}" data-tariff-locality="${i}" aria-label="Ciudad"/></td><td><select data-tariff-phone-category="${i}">${['Gama blanca','Clima'].map(c=>`<option ${c===t.category?'selected':''}>${c}</option>`).join('')}</select></td><td><input type="number" min="0" step="0.01" value="${t.price}" data-tariff-price="${i}"/></td><td><button class="mini-delete" data-tariff-delete="${i}" aria-label="Eliminar tarifa telefónica">×</button></td></tr>`:'').join('')||'<tr><td colspan="4" class="empty">Todavía no hay tarifas por ciudad.</td></tr>';
-  $$('[data-tariff-landing]').forEach(x=>x.addEventListener('change',e=>updateTariff(+e.target.dataset.tariffLanding,{landing_id:e.target.value})));
-  $$('[data-tariff-category]').forEach(x=>x.addEventListener('change',e=>updateTariff(+e.target.dataset.tariffCategory,{category:e.target.value})));
+  $$('[data-landing-tariff-price]').forEach(input=>input.addEventListener('change',e=>updateLandingTariff(e.target.dataset.landingTariffPrice,e.target.dataset.landingTariffCategory,Number(e.target.value||0),e.target)));
   $$('[data-tariff-phone-category]').forEach(x=>x.addEventListener('change',e=>updateTariff(+e.target.dataset.tariffPhoneCategory,{category:e.target.value})));
   $$('[data-tariff-locality]').forEach(x=>x.addEventListener('change',e=>updateTariff(+e.target.dataset.tariffLocality,{locality:e.target.value.trim()})));
   $$('[data-tariff-price]').forEach(x=>x.addEventListener('change',e=>updateTariff(+e.target.dataset.tariffPrice,{price:Number(e.target.value||0)})));
   $$('[data-tariff-delete]').forEach(x=>x.addEventListener('click',async e=>{const t=tariffs[+e.target.dataset.tariffDelete];if(!await confirmDialog('¿Eliminar esta tarifa?'))return;const {error}=await db.from('tariffs').delete().eq('id',t.id);if(error)toast(errorText(error),'Error');else{tariffs=tariffs.filter(x=>x.id!==t.id);renderPriceRules();renderRows();}}));
+}
+async function updateLandingTariff(landingId,category,price,input) {
+  const landing=landings.find(item=>item.id===landingId);
+  if(!landing||!Number.isFinite(price)||price<0){renderPriceRules();return;}
+  const existing=tariffs.find(t=>(t.scope||'landing')==='landing'&&t.landing_id===landingId&&t.category===category);
+  if(existing&&Number(existing.price)===price)return;
+  if(input)input.disabled=true;
+  const values={price,updated_at:new Date().toISOString()};
+  const result=existing
+    ? await db.from('tariffs').update(values).eq('id',existing.id).select().single()
+    : await db.from('tariffs').insert({company_id:currentCompany.id,scope:'landing',landing_id:landingId,locality:null,category,price}).select().single();
+  if(result.error){toast(errorText(result.error),'Tarifa no guardada');renderPriceRules();if(input)input.disabled=false;return;}
+  const index=existing?tariffs.findIndex(t=>t.id===existing.id):-1;
+  if(index>=0)tariffs[index]=result.data;else tariffs.push(result.data);
+  renderRows();renderReport();
+  if(input)input.disabled=false;
 }
 async function updateTariff(i,changes) {
   const t=tariffs[i];if(!t)return;
@@ -1164,7 +1183,6 @@ function wireUI() {
   $('#fieldLandingFilter').addEventListener('change',()=>{$('#newFieldLanding').value=$('#fieldLandingFilter').value;renderFields();});
   $('#page-empresas .page-head .primary-btn').addEventListener('click',addCompany);
   $('#saveSettings').addEventListener('click',saveCompanySettings);
-  $('#addPrice').addEventListener('click',addTariff);
   $('#addPhonePrice').addEventListener('click',addPhoneTariff);
 }
 async function addField() {
@@ -1175,13 +1193,6 @@ async function addField() {
   const landing_id=fieldScope==='landing'?($('#newFieldLanding')?.value||null):null;
   const {data,error}=await db.from('notice_fields').insert({company_id:currentCompany.id,landing_id,channel:fieldScope,field_key:key,label,field_type,options,required:false,visible_in_form:true,visible_in_table:true,visible_on_card:true,position:fieldEditorRows.length+1}).select().single();
   if(error){toast(errorText(error),'No se pudo añadir');return;}fields.push(data);$('#newFieldName').value='';renderFields();renderRows();renderExtraFields();
-}
-async function addTariff() {
-  if(!landings.length){toast('Crea primero una landing.');return;}
-  const next=landings.flatMap(l=>['Gama blanca','Clima'].map(category=>({landing_id:l.id,category,scope:'landing'}))).find(candidate=>!tariffs.some(t=>(t.scope||'landing')==='landing'&&t.landing_id===candidate.landing_id&&t.category===candidate.category));
-  if(!next){toast('Ya hay una tarifa para Gama blanca y Clima en cada landing.');return;}
-  const {data,error}=await db.from('tariffs').insert({...next,company_id:currentCompany.id,price:0}).select().single();
-  if(error){toast(errorText(error),'No se pudo crear tarifa');return;}tariffs.push(data);renderPriceRules();
 }
 async function exportCsv(report=false) {
   const rows=report?getReportRows():filteredNotices(false);
