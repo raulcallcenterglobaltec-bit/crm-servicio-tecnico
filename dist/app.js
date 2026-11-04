@@ -48,7 +48,7 @@ function formDialog({title,description='',fields=[],confirmText='Guardar'}) {
     const finish=value=>{backdrop.remove();resolve(value);};
     backdrop.addEventListener('click',e=>{const target=e.target;if(target===backdrop||(target instanceof Element&&target.closest('[data-dialog-cancel]'))){e.preventDefault();e.stopPropagation();finish(null);}});
     $('form',backdrop).addEventListener('submit',e=>{e.preventDefault();const result={};for(const f of fields){const el=$('[name="'+CSS.escape(f.key)+'"]',backdrop);if(f.type==='search-select'&&!el.value){const search=$('[data-search-select-input="'+CSS.escape(f.key)+'"]',backdrop);search.setCustomValidity('Selecciona un cliente de la lista.');search.reportValidity();search.focus();return;}result[f.key]=f.type==='checkbox'?el.checked:f.type==='number'?Number(el.value):f.type==='file'?(el.files?.[0]||null):el.value;}finish(result);});
-    $('[data-search-select-input]',backdrop).forEach(input=>{
+    $$('[data-search-select-input]',backdrop).forEach(input=>{
       const key=input.dataset.searchSelectInput,hidden=$('[name="'+CSS.escape(key)+'"]',backdrop),results=$('[data-search-select-results="'+CSS.escape(key)+'"]',backdrop),options=(fields.find(f=>f.key===key)?.options||[]).map(o=>typeof o==='string'?{value:o,label:o}:o);
       const render=()=>{
         const query=input.value.trim().toLocaleLowerCase();
@@ -898,8 +898,8 @@ function renderExtraFields() {
   const grid=$('#noticeFieldsGrid');if(!grid)return;
   const domKeys={name:'customer_name',phone:'phone',locality:'locality',postal:'postal_code'};
   const nodes=new Map();
-  $('[data-field-code]',grid).forEach(node=>nodes.set(domKeys[node.dataset.fieldCode]||node.dataset.fieldCode,node));
-  $('[data-custom-key]',host).forEach(node=>nodes.set(node.dataset.customKey,node));
+  $$('[data-field-code]',grid).forEach(node=>nodes.set(domKeys[node.dataset.fieldCode]||node.dataset.fieldCode,node));
+  $$('[data-custom-key]',host).forEach(node=>nodes.set(node.dataset.customKey,node));
   fieldsForPhone().forEach(field=>{const node=nodes.get(field.field_key);if(node)grid.append(node);});
 }
 function syncDefaultFields() {
