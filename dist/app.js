@@ -27,7 +27,7 @@ function toast(message, title='Aviso') {
 }
 function formDialog({title,description='',fields=[],confirmText='Guardar'}) {
   return new Promise(resolve=>{
-    const backdrop=document.createElement('div');backdrop.className='modal-backdrop open';backdrop.style.zIndex='120';
+    const backdrop=document.createElement('div');backdrop.className='modal-backdrop open';const highestBackdropZ=[...document.querySelectorAll('.modal-backdrop')].reduce((max,el)=>Math.max(max,Number(el.style.zIndex)||0),110);backdrop.style.zIndex=String(Math.max(120,highestBackdropZ+10));
     const controls=fields.map(f=>{
       const label=esc(f.label),key=esc(f.key),value=esc(f.value??''),required=f.required?'required':'';
       let control;
@@ -40,13 +40,13 @@ function formDialog({title,description='',fields=[],confirmText='Guardar'}) {
     }).join('');
     backdrop.innerHTML=`<form class="modal" style="max-height:90vh;overflow:auto" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>${esc(title)}</h2><p>${esc(description)}</p></div><button class="close" type="button" data-dialog-cancel aria-label="Cerrar">×</button></div>${controls}<div class="modal-actions"><button class="outline-btn" type="button" data-dialog-cancel>Cancelar</button><button class="primary-btn" type="submit">${esc(confirmText)}</button></div></form>`;
     const finish=value=>{backdrop.remove();resolve(value);};
-    backdrop.addEventListener('click',e=>{if(e.target===backdrop||e.target.closest('[data-dialog-cancel]'))finish(null);});
+    backdrop.addEventListener('click',e=>{const target=e.target;if(target===backdrop||(target instanceof Element&&target.closest('[data-dialog-cancel]'))){e.preventDefault();e.stopPropagation();finish(null);}});
     $('form',backdrop).addEventListener('submit',e=>{e.preventDefault();const result={};for(const f of fields){const el=$('[name="'+CSS.escape(f.key)+'"]',backdrop);result[f.key]=f.type==='checkbox'?el.checked:f.type==='number'?Number(el.value):el.value;}finish(result);});
     document.body.append(backdrop);$('[name]',backdrop)?.focus();
   });
 }
 function infoDialog(title,content) {
-  const backdrop=document.createElement('div');backdrop.className='modal-backdrop open';backdrop.style.zIndex='120';
+  const backdrop=document.createElement('div');backdrop.className='modal-backdrop open';const highestBackdropZ=[...document.querySelectorAll('.modal-backdrop')].reduce((max,el)=>Math.max(max,Number(el.style.zIndex)||0),110);backdrop.style.zIndex=String(Math.max(120,highestBackdropZ+10));
   backdrop.innerHTML=`<div class="modal" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>${esc(title)}</h2></div><button class="close" type="button">×</button></div><pre style="white-space:pre-wrap;font:13px/1.6 inherit;color:#465268">${esc(content)}</pre><div class="modal-actions"><button class="primary-btn" type="button">Cerrar</button></div></div>`;
   document.body.append(backdrop);$$('.close, .primary-btn',backdrop).forEach(b=>b.onclick=()=>backdrop.remove());backdrop.onclick=e=>{if(e.target===backdrop)backdrop.remove();};
 }
