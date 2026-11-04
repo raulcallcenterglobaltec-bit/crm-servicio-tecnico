@@ -158,8 +158,13 @@ async function loadMembershipsOnce() {
   membershipLoadStage='preparando la empresa seleccionada';
   currentCompany=companies.find(c=>c.id===currentCompany?.id)||companies[0];
   $('#authScreen')?.remove();
-  membershipLoadStage='inicializando la empresa';
-  mountSignOut(); renderCompanyPicker(); renderCompanyPage(); renderMembers(); renderIntegrations(); renderSettings(); await loadCompanyData();
+  membershipLoadStage='montando cabecera de usuario';mountSignOut();
+  membershipLoadStage='dibujando selector de empresa';renderCompanyPicker();
+  membershipLoadStage='dibujando lista de empresas';renderCompanyPage();
+  membershipLoadStage='dibujando usuarios';renderMembers();
+  membershipLoadStage='cargando integraciones';renderIntegrations();
+  membershipLoadStage='cargando configuración';renderSettings();
+  membershipLoadStage='cargando datos de empresa';await loadCompanyData();
   membershipLoadStage='carga completada';
 }
 async function loadMemberships() {
@@ -234,11 +239,12 @@ async function fetchAllNotices(companyId) {
 }
 async function loadCompanyData() {
   if(!currentCompany)return;
-  renderCompanyBrand();
-  applyCompanyTheme(currentCompany.primary_color);
+  membershipLoadStage='actualizando marca de empresa';renderCompanyBrand();
+  membershipLoadStage='aplicando tema de empresa';applyCompanyTheme(currentCompany.primary_color);
   document.title=currentCompany.name+' · CRM Gestión de avisos';
   try {
     const c=currentCompany.id;
+    membershipLoadStage='consultando tablas de empresa';
     const results=await Promise.all([
       db.from('landings').select('*').eq('company_id',c).order('name'),
       fetchAllNotices(c),
@@ -246,20 +252,43 @@ async function loadCompanyData() {
       db.from('notice_fields').select('*').eq('company_id',c).order('position'),
       db.from('company_members').select('company_id,user_id,email,role').eq('company_id',c).order('email')
     ]);
+    membershipLoadStage='validando las respuestas de base de datos';
     for(const r of results)if(r.error)throw r.error;
     [landings,notices,tariffs,fields,members]=results.map(r=>Array.isArray(r.data)?r.data:[]);
     applyAccessPermissions();
+    membershipLoadStage='preparando campos de avisos';
     if(!fields.length){const seeds=['phone','landing'].flatMap(channel=>defaultFields.map(f=>({...f,channel,options:f.options||[],company_id:c})));const {data:createdFields,error}=await db.from('notice_fields').insert(seeds).select();if(error)throw error;fields=createdFields||[];}
+    membershipLoadStage='conectando avisos en tiempo real';
     if(realtimeChannel&&realtimeCompanyId!==c){const oldChannel=realtimeChannel;realtimeChannel=null;realtimeCompanyId=null;try{await db.removeChannel(oldChannel);}catch(removeError){console.warn('No se pudo cerrar la suscripción anterior de avisos',removeError);}}
     if(!realtimeChannel){realtimeCompanyId=c;realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();renderComplaints();renderClientHistory();}}).subscribe();}
-    $$('.demo-banner').forEach(el=>el.remove());setConnectionError('');
-    renderLandingOptions();renderRows();renderReport();renderComplaints();renderClientHistory();renderFields();renderPriceRules();renderCompanyPage();renderMembers();renderIntegrations();renderSettings();
-    mountSignOut();
+    $('.demo-banner').forEach(el=>el.remove());setConnectionError('');
+    membershipLoadStage='dibujando opciones de landing';renderLandingOptions();
+    membershipLoadStage='dibujando tabla de avisos';renderRows();
+    membershipLoadStage='dibujando informes';renderReport();
+    membershipLoadStage='dibujando reclamaciones';renderComplaints();
+    membershipLoadStage='dibujando historial';renderClientHistory();
+    membershipLoadStage='dibujando campos';renderFields();
+    membershipLoadStage='dibujando tarifas';renderPriceRules();
+    membershipLoadStage='dibujando empresas';renderCompanyPage();
+    membershipLoadStage='dibujando usuarios';renderMembers();
+    membershipLoadStage='dibujando integraciones';renderIntegrations();
+    membershipLoadStage='dibujando configuración';renderSettings();
+    membershipLoadStage='cargando usuario';mountSignOut();
   } catch(error) {
+    const originalStage=membershipLoadStage;
     landings=[];notices=[];tariffs=[];fields=[];
-    $$('.demo-banner').forEach(el=>el.remove());
-    renderLandingOptions();renderRows();renderReport();renderComplaints();renderClientHistory();renderFields();renderPriceRules();renderCompanyPage();renderMembers();renderIntegrations();renderSettings();
-    const message='No se pudieron cargar los datos de esta empresa: '+errorText(error);
+    $('.demo-banner').forEach(el=>el.remove());
+    membershipLoadStage='limpiando tabla de avisos';renderLandingOptions();renderRows();
+    membershipLoadStage='limpiando informes';renderReport();
+    membershipLoadStage='limpiando reclamaciones';renderComplaints();
+    membershipLoadStage='limpiando historial';renderClientHistory();
+    membershipLoadStage='limpiando campos';renderFields();
+    membershipLoadStage='limpiando tarifas';renderPriceRules();
+    membershipLoadStage='limpiando empresas';renderCompanyPage();
+    membershipLoadStage='limpiando usuarios';renderMembers();
+    membershipLoadStage='limpiando integraciones';renderIntegrations();
+    membershipLoadStage='limpiando configuración';renderSettings();
+    const message='No se pudieron cargar los datos de esta empresa ('+originalStage+'): '+errorText(error);
     setConnectionError(message);toast(message,'Error de conexión');
   }
 }
