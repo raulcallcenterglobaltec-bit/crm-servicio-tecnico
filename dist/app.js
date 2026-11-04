@@ -50,8 +50,8 @@ function formDialog({title,description='',fields=[],confirmText='Guardar'}) {
     const finish=value=>{backdrop.remove();resolve(value);};
     backdrop.addEventListener('click',e=>{const target=e.target;if(target===backdrop||(target instanceof Element&&target.closest('[data-dialog-cancel]'))){e.preventDefault();e.stopPropagation();finish(null);}});
     $('form',backdrop).addEventListener('submit',e=>{e.preventDefault();const result={};for(const f of fields){if(f.type==='action')continue;const el=$('[name="'+CSS.escape(f.key)+'"]',backdrop);if(f.type==='search-select'&&!el.value){const search=$('[data-search-select-input="'+CSS.escape(f.key)+'"]',backdrop);search.setCustomValidity('Selecciona un cliente de la lista.');search.reportValidity();search.focus();return;}result[f.key]=f.type==='checkbox'?el.checked:f.type==='number'?Number(el.value):f.type==='file'?(el.files?.[0]||null):el.value;}finish(result);});
-    $('[data-dialog-action]',backdrop).forEach(button=>{const field=fields.find(f=>f.type==='action'&&f.key===button.dataset.dialogAction);button.addEventListener('click',()=>field?.onAction?.({backdrop}));});
-    $('[data-search-select-input]',backdrop).forEach(input=>{
+    $$('[data-dialog-action]',backdrop).forEach(button=>{const field=fields.find(f=>f.type==='action'&&f.key===button.dataset.dialogAction);button.addEventListener('click',()=>field?.onAction?.({backdrop}));});
+    $$('[data-search-select-input]',backdrop).forEach(input=>{
       const key=input.dataset.searchSelectInput,hidden=$('[name="'+CSS.escape(key)+'"]',backdrop),results=$('[data-search-select-results="'+CSS.escape(key)+'"]',backdrop),options=(fields.find(f=>f.key===key)?.options||[]).map(o=>typeof o==='string'?{value:o,label:o}:o);
       const render=()=>{
         const query=input.value.trim().toLocaleLowerCase();
@@ -435,8 +435,8 @@ function renderKanban(rows) {
     column.addEventListener('drop',async event=>{event.preventDefault();column.classList.remove('drag-over');const id=event.dataTransfer.getData('text/plain');if(id)await handleNoticeStatusChange(id,column.dataset.dropStatus,null);});
   });
   $$('[data-card-status]',board).forEach(select=>select.addEventListener('change',event=>handleNoticeStatusChange(event.target.dataset.cardStatus,event.target.value,event.target)));
-  $('[data-open-card]',board).forEach(button=>button.addEventListener('click',()=>showDetails(button.dataset.openCard)));
-  $('[data-delete-card]',board).forEach(button=>button.addEventListener('click',()=>deleteNotice(button.dataset.deleteCard)));
+  $$('[data-open-card]',board).forEach(button=>button.addEventListener('click',()=>showDetails(button.dataset.openCard)));
+  $$('[data-delete-card]',board).forEach(button=>button.addEventListener('click',()=>deleteNotice(button.dataset.deleteCard)));
 }
 function renderRows() {
   const body=$('#noticeRows');if(!body)return;
@@ -1496,7 +1496,7 @@ function openFreeSlotsDialog(parentBackdrop,ignoreAppointmentId=null) {
   };
   dateInput.addEventListener('change',render);
   list.addEventListener('click',event=>{const button=event.target.closest('[data-free-slot]');if(!button)return;if(parentStart){parentStart.value=localDateTimeValue(new Date(button.dataset.freeSlot));parentStart.dispatchEvent(new Event('input',{bubbles:true}));parentStart.dispatchEvent(new Event('change',{bubbles:true}));}backdrop.remove();});
-  $('[data-free-slots-close]',backdrop).forEach(button=>button.addEventListener('click',()=>backdrop.remove()));
+  $$('[data-free-slots-close]',backdrop).forEach(button=>button.addEventListener('click',()=>backdrop.remove()));
   backdrop.addEventListener('click',event=>{if(event.target===backdrop)backdrop.remove();});
   document.body.append(backdrop);render();
 }
