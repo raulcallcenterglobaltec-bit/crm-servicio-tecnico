@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#5267e8">
+  <meta name="referrer" content="no-referrer">
+  <title>Formulario de asistencia</title>
+  <style>
+    :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#182235;background:#f4f6fb}
+    *{box-sizing:border-box}body{margin:0;padding:24px;background:#f4f6fb}.shell{max-width:620px;margin:0 auto}.card{background:#fff;border:1px solid #e7eaf1;border-radius:18px;padding:clamp(22px,5vw,38px);box-shadow:0 12px 34px rgba(28,39,72,.08)}.brand{display:flex;align-items:center;gap:12px;margin-bottom:24px}.logo{width:52px;height:52px;object-fit:contain;border-radius:12px}.brand-name{font-size:14px;color:#657187}.eyebrow{font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--accent);font-weight:800;margin:0 0 8px}h1{font-size:clamp(23px,5vw,30px);line-height:1.15;margin:0 0 10px} .intro{color:#667287;margin:0 0 25px}.fields{display:grid;gap:16px}.field{display:grid;gap:7px;font-weight:650}.field span{font-size:14px}.field input,.field select,.field textarea{width:100%;border:1px solid #dfe4ed;border-radius:10px;padding:12px 13px;background:#fff;color:#182235;min-height:46px}.field textarea{min-height:110px;resize:vertical}.check{display:flex;align-items:flex-start;gap:10px;font-weight:500}.check input{margin-top:4px;accent-color:var(--accent)}button{border:0;border-radius:10px;background:var(--accent);color:#fff;font-weight:750;padding:14px 18px;min-height:48px;width:100%;margin-top:20px;cursor:pointer}button:disabled{opacity:.65;cursor:wait}.status{margin-top:15px;padding:12px;border-radius:10px;display:none}.status.error{display:block;background:#fff0f2;color:#9a3346}.status.success{display:block;background:#e8f7ef;color:#176c51}.loading{color:#667287}.trap{position:absolute!important;left:-10000px!important;width:1px!important;height:1px!important;overflow:hidden!important}footer{font-size:12px;color:#738096;margin-top:18px;text-align:center}@media(max-width:480px){body{padding:12px}.card{border-radius:14px;padding:22px}}
+  </style>
+  <script src="supabase-config.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <section class="card" id="card">
+      <div class="loading" id="loading" role="status">Cargando formulario…</div>
+      <div id="content" hidden>
+        <div class="brand" id="brand"></div>
+        <p class="eyebrow">Solicitud de asistencia</p>
+        <h1 id="heading">Cuéntanos qué necesitas</h1>
+        <p class="intro" id="intro">Completa los datos para enviar tu solicitud.</p>
+        <form id="requestForm" novalidate>
+          <label class="field trap" aria-hidden="true">Deja este campo vacío<input name="website" tabindex="-1" autocomplete="off"></label>
+          <div class="fields" id="fields"></div>
+          <button type="submit" id="submit">Enviar solicitud</button>
+        </form>
+        <div class="status" id="status" role="status" aria-live="polite"></div>
+      </div>
+    </section>
+    <footer>Formulario seguro de recepción de solicitudes</footer>
+  </main>
+  <script>
+    const apiBase=(window.CRM_SUPABASE_CONFIG?.url||'').replace(/\/$/,'');
+    const formKey=new URLSearchParams(location.search).get('key')||'';
+    const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const typeFor=type=>({phone:'tel',email:'email',number:'number',date:'date'}[type]||'text');
+    const status=(message,kind)=>{const el=document.getElementById('status');el.className='status '+kind;el.textContent=message;};
+    function renderField(field,index){
+      const name=esc(field.field_key),label=esc(field.label),required=field.required?'required':'',id='field-'+index;
+      if(field.field_type==='checkbox')return '<label class="check" for="'+id+'"><input id="'+id+'" name="'+name+'" type="checkbox" '+required+'><span>'+label+'</span></label>';
+      if(field.field_type==='select'){
+        const options=Array.isArray(field.options)?field.options:[];
+        return '<label class="field" for="'+id+'"><span>'+label+(field.required?' *':'')+'</span><select id="'+id+'" name="'+name+'" '+required+'><option value="">Selecciona una opción</option>'+options.map(value=>'<option value="'+esc(value)+'">'+esc(value)+'</option>').join('')+'</select></label>';
+      }
+      if(field.field_type==='textarea')return '<label class="field" for="'+id+'"><span>'+label+(field.required?' *':'')+'</span><textarea id="'+id+'" name="'+name+'" '+required+'></textarea></label>';
+      return '<label class="field" for="'+id+'"><span>'+label+(field.required?' *':'')+'</span><input id="'+id+'" name="'+name+'" type="'+typeFor(field.field_type)+'" '+required+'></label>';
+    }
+    async function init(){
+      if(!apiBase||!formKey)throw new Error('El enlace del formulario no es válido.');
+      const endpoint=apiBase+'/functions/v1/service-form';
+      const response=await fetch(endpoint+'?landing_key='+encodeURIComponent(formKey));
+      const payload=await response.json();
+      if(!response.ok)throw new Error(payload.error||'No se pudo cargar el formulario.');
+      const company=payload.company||{},landing=payload.landing||{};
+      const accent=/^#[0-9a-fA-F]{6}$/.test(company.primary_color||'')?company.primary_color:'#5267e8';
+      document.documentElement.style.setProperty('--accent',accent);
+      document.title=(company.name||'Asistencia')+' · Formulario';
+      document.getElementById('heading').textContent='Cuéntanos qué necesitas';
+      document.getElementById('intro').textContent=landing.name?'Formulario de solicitud · '+landing.name:'Completa los datos para enviar tu solicitud.';
+      const brand=document.getElementById('brand');
+      if(company.logo_path)brand.innerHTML='<img class="logo" src="'+esc(company.logo_path)+'" alt=""><span class="brand-name">'+esc(company.name||'')+'</span>';
+      else brand.innerHTML='<span class="brand-name">'+esc(company.name||'')+'</span>';
+      const fields=(payload.fields||[]).slice().sort((a,b)=>(a.position||0)-(b.position||0));
+      if(!fields.length)throw new Error('Esta landing todavía no tiene campos visibles en el formulario.');
+      document.getElementById('fields').innerHTML=fields.map(renderField).join('');
+      document.getElementById('loading').hidden=true;
+      document.getElementById('content').hidden=false;
+      document.getElementById('requestForm').addEventListener('submit',async event=>{
+        event.preventDefault();
+        const form=event.currentTarget;
+        if(!form.reportValidity())return;
+        const values={};
+        for(const field of fields){
+          const el=form.elements.namedItem(field.field_key);
+          values[field.field_key]=field.field_type==='checkbox'?el.checked:el.value.trim();
+        }
+        const trap=form.elements.namedItem('website');
+        const button=document.getElementById('submit');button.disabled=true;button.textContent='Enviando…';
+        try{
+          const result=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({landing_key:formKey,data:values,honeypot:trap.value})});
+          const body=await result.json();
+          if(!result.ok||!body.ok)throw new Error(body.error||'No se pudo enviar la solicitud.');
+          form.hidden=true;status('Hemos recibido tu solicitud. Gracias.','success');
+          document.getElementById('intro').textContent='La solicitud se ha enviado correctamente.';
+        }catch(error){status(error.message||'No se pudo enviar la solicitud. Inténtalo de nuevo.','error');button.disabled=false;button.textContent='Enviar solicitud';}
+      });
+    }
+    init().catch(error=>{document.getElementById('loading').textContent=error.message||'No se pudo cargar el formulario.';});
+  </script>
+</body>
+</html>
