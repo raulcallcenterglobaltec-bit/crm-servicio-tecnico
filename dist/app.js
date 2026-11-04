@@ -597,7 +597,7 @@ async function handleNoticeStatusChange(id,status,select){
     reason=await requestNoSaleReason(notice.management_reason||'');
     if(reason===null){if(select)select.value=notice.status||'Nuevo';else renderRows();return;}
   }
-  const saved=await changeStatus(id,effectiveStatus,reason);
+  const saved=await changeStatus(id,status,reason);
   if(!saved){if(select)select.value=notice.status||'Nuevo';else renderRows();}
 }
 async function deleteNotice(id){
@@ -732,7 +732,7 @@ function openPendingNotices(status='Nuevo') {
       host.querySelectorAll('button').forEach(button=>button.disabled=true);
       if(saveButton)saveButton.textContent='Guardando…';
       if(scheduleButton)scheduleButton.textContent='Guardando…';
-      const saved=await changeStatus(id,status,reason);
+      const saved=await changeStatus(id,effectiveStatus,reason);
       if(saved){
         if(scheduleButton){close();toast('Aviso sacado. Puedes completar la cita.','Aviso actualizado');await openAppointmentDialog(null,{notice_id:id});}
         else {toast(status==='Sale'?'Aviso marcado como sacado.':status==='No sale'?'Aviso marcado como no sacado.':'Aviso guardado como pendiente.','Gestión actualizada');if(backdrop.isConnected)renderPendingNoticeList(backdrop);}
