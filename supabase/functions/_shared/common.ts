@@ -91,15 +91,18 @@ export async function sendNoticeNotifications(admin: SupabaseClient, companyId: 
       const isCancellation = notice.notice_type === 'anulacion'
       const isComplaint = eventType === 'complaint'
       const title = test ? 'Prueba de CRM Gestión de avisos' : isCancellation ? 'Nueva anulación telefónica' : isComplaint ? 'Nueva reclamación telefónica' : 'Nuevo aviso recibido'
-      const originLabel = isComplaint ? 'Origen: Teléfono' : eventType === 'form' ? `Landing: ${landingName}` : 'Origen: Teléfono'
+      const originLabel = isComplaint ? 'Origen: Teléfono' : eventType === 'form' ? `Origen: ${landingName}` : 'Origen: Teléfono'
       const message = test ? 'La conexión de notificaciones está funcionando.' : `${title}\n${originLabel}\nHora: ${time}\nCliente: ${notice.customer_name || '—'}\nTeléfono: ${notice.phone || '—'}${eventType === 'form' ? `\nAparato: ${notice.device || '—'}\nAvería: ${notice.issue || '—'}` : `\nDetalle: ${notice.issue || '—'}`}`
       const destination = integrationDestination(config, item.kind, eventType)
       if (!test && (destination == null || destination === '' || (Array.isArray(destination) && !destination.length))) throw new Error(`Configura el destino de ${eventType === 'form' ? 'formularios' : eventType === 'phone' ? 'avisos telefónicos' : 'reclamaciones o anulaciones'} para ${item.kind}.`)
       if (item.kind === 'telegram') {
         const telegramChat = test ? (config.form_chat_id || config.chat_id) : destination
+        const telegramText = message.split('\n').map(line => line === originLabel
+          ? `<b>${htmlEscape(line)}</b>`
+          : htmlEscape(line)).join('\n')
         const response = await fetch(`https://api.telegram.org/bot${config.bot_token}/sendMessage`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: telegramChat, text: message }),
+          body: JSON.stringify({ chat_id: telegramChat, text: telegramText, parse_mode: 'HTML' }),
         })
         if (!response.ok) throw new Error(`Telegram respondió ${response.status}`)
       } else if (item.kind === 'email') {
