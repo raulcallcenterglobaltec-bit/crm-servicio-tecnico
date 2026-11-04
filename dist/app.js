@@ -483,13 +483,19 @@ function renderRows() {
   renderReport();
 }
 function renderComplaints() {
-  const body=$('#complaintRows');if(!body)return;
-  const rows=notices.filter(n=>n.notice_type==='reclamacion'||n.notice_type==='anulacion').sort((a,b)=>new Date(b.received_at)-new Date(a.received_at));
-  $('#complaintCount').textContent=`${rows.length} ${rows.length===1?'registro':'registros'}`;
-  $('#complaintEmpty').hidden=rows.length>0;
-  body.innerHTML=rows.map(n=>`<tr><td>${esc(formatDate(n.received_at))}</td><td><div class="client-cell"><span class="client-initial">${esc((n.customer_name||'??').slice(0,2).toUpperCase())}</span><div><strong>${esc(n.customer_name||'Sin nombre')}</strong><small>${esc(n.locality||'')}</small></div></div></td><td>${esc(n.phone||'—')}</td><td><span class="source">${n.notice_type==='anulacion'?'Anulación':'Reclamación'}</span></td><td class="complaint-detail">${esc(n.issue||'—')}</td><td>${n.status==='Sale'?'Envío solicitado':n.status==='No sale'?'No es nuestra (cliente equivocado)':'Registro anterior'}</td><td><div class="notice-row-actions"><button class="row-action" data-complaint-detail="${esc(n.id)}" aria-label="Ver datos" title="Ver datos">···</button>${isSuperAdmin&&n.notice_type==='reclamacion'?`<button class="row-action notice-delete" data-delete-complaint="${esc(n.id)}" aria-label="Eliminar reclamación" title="Eliminar reclamación">×</button>`:''}</div></td></tr>`).join('');
-  $$('[data-complaint-detail]',body).forEach(button=>button.onclick=()=>showDetails(button.dataset.complaintDetail));
-  $$('[data-delete-complaint]',body).forEach(button=>button.onclick=()=>deleteComplaint(button.dataset.deleteComplaint));
+  const lists=[
+    {type:'reclamacion',body:'#complaintRows',count:'#complaintCount',empty:'#complaintEmpty'},
+    {type:'anulacion',body:'#cancellationRows',count:'#cancellationCount',empty:'#cancellationEmpty'}
+  ];
+  for(const list of lists){
+    const body=$(list.body);if(!body)continue;
+    const rows=notices.filter(n=>n.notice_type===list.type).sort((x,y)=>new Date(y.received_at)-new Date(x.received_at));
+    $(list.count).textContent=rows.length+' '+(rows.length===1?'registro':'registros');
+    $(list.empty).hidden=rows.length>0;
+    body.innerHTML=rows.map(n=>'<tr><td>'+esc(formatDate(n.received_at))+'</td><td><div class="client-cell"><span class="client-initial">'+esc((n.customer_name||'??').slice(0,2).toUpperCase())+'</span><div><strong>'+esc(n.customer_name||'Sin nombre')+'</strong><small>'+esc(n.locality||'')+'</small></div></div></td><td>'+esc(n.phone||'—')+'</td><td class="complaint-detail">'+esc(n.issue||'—')+'</td><td>'+(n.status==='Sale'?'Envío solicitado':n.status==='No sale'?'No es nuestra (cliente equivocado)':'Registro anterior')+'</td><td><div class="notice-row-actions"><button class="row-action" data-record-detail="'+esc(n.id)+'" aria-label="Ver datos" title="Ver datos">···</button>'+(isSuperAdmin&&list.type==='reclamacion'?'<button class="row-action notice-delete" data-delete-complaint="'+esc(n.id)+'" aria-label="Eliminar reclamación" title="Eliminar reclamación">×</button>':'')+'</div></td></tr>').join('');
+    $$('[data-record-detail]',body).forEach(button=>button.onclick=()=>showDetails(button.dataset.recordDetail));
+    $$('[data-delete-complaint]',body).forEach(button=>button.onclick=()=>deleteComplaint(button.dataset.deleteComplaint));
+  }
 }
 async function deleteComplaint(id){
   if(!isSuperAdmin)return false;
@@ -1722,11 +1728,11 @@ async function syncPendingCalendarAppointments() {
 }
 
 function showPage(name) {
-  if(!isSuperAdmin&&!['avisos-landing','avisos-phone','informes','reclamaciones','historial','agenda'].includes(name))return;
+  if(!isSuperAdmin&&!['avisos-landing','avisos-phone','informes','reclamaciones','anulaciones','historial','agenda'].includes(name))return;
   const pageName=(name==='avisos-landing'||name==='avisos-phone')?'avisos':name;
   $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+pageName));
   $$('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
-  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',reclamaciones:'Reclamaciones o anulaciones',historial:'Historial de clientes',agenda:'Agenda - Citas',empresas:'Empresas',usuarios:'Usuarios y permisos',personalizacion:'Personalización',configuracion:'Configuración',integraciones:'Integraciones'};
+  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',reclamaciones:'Reclamaciones',anulaciones:'Anulaciones',historial:'Historial de clientes',agenda:'Agenda - Citas',empresas:'Empresas',usuarios:'Usuarios y permisos',personalizacion:'Personalización',configuracion:'Configuración',integraciones:'Integraciones'};
   $('#breadcrumb').textContent='Panel / '+labels[name];
   if(pageName==='avisos'){
     noticeSource=name==='avisos-phone'?'phone':'landing';
@@ -1738,7 +1744,7 @@ function showPage(name) {
     $('#latestNoticesTitle').textContent=phone?'Últimos avisos por teléfono':'Últimos avisos por formulario';
     renderRows();
   }
-  if(pageName==='reclamaciones')renderComplaints();
+  if(pageName==='reclamaciones'||pageName==='anulaciones')renderComplaints();
   if(pageName==='historial')renderClientHistory();
   if(pageName==='agenda')renderAgenda();
   $('#sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'});
@@ -1755,6 +1761,7 @@ function wireUI() {
   $('#cardFieldsToggle').addEventListener('click',()=>{$('#cardFieldPanel').hidden=!$('#cardFieldPanel').hidden;});
   $('#newNotice').addEventListener('click',event=>{event.preventDefault();openPhoneNotice('aviso');});
   $('#newComplaint').addEventListener('click',()=>openPhoneNotice('reclamacion'));
+  $('#newCancellation').addEventListener('click',()=>openPhoneNotice('anulacion'));
   $('#agendaPrev').addEventListener('click',()=>shiftAgendaPeriod(-1));
   $('#agendaNext').addEventListener('click',()=>shiftAgendaPeriod(1));
 
