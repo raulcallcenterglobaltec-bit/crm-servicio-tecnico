@@ -939,7 +939,7 @@ function showDuplicatePhoneDialog(matches,normalizedPhone) {
   backdrop.innerHTML='<div class="modal" style="width:min(760px,calc(100vw - 28px));max-height:90vh;overflow:auto" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>Cliente repetido</h2><p>Este teléfono ya aparece en '+matches.length+' '+(matches.length===1?'aviso':'avisos')+' de la empresa. Revisa el historial y decide cómo registrarlo.</p></div><button type="button" class="close" data-duplicate-cancel aria-label="Cerrar">×</button></div><div style="display:grid;gap:8px;margin:14px 0">'+rows+'</div>'+extra+'<p style="font-size:12px;color:#68758a">Puedes consultar el aviso anterior o crear una reclamación vinculada. Si se trata de otra avería, también puedes crear un aviso nuevo.</p><div class="modal-actions"><button type="button" class="outline-btn" data-duplicate-cancel>Volver al aviso</button><button type="button" class="primary-btn" data-duplicate-new>Aun así, crear aviso nuevo</button></div></div>';
   const close=()=>backdrop.remove();
   backdrop.addEventListener('click',e=>{if(e.target===backdrop||e.target.closest('[data-duplicate-cancel]'))close();});
-  $$('[data-duplicate-view]',backdrop).forEach(button=>button.onclick=()=>{const id=button.dataset.duplicateView;close();showDetails(id);});
+  $('[data-duplicate-view]',backdrop).forEach(button=>button.onclick=()=>showDetails(button.dataset.duplicateView));
   $$('[data-duplicate-claim]',backdrop).forEach(button=>button.onclick=async()=>{const id=button.dataset.duplicateClaim;close();await openPhoneNotice('reclamacion',id);});
   $('[data-duplicate-new]',backdrop).onclick=()=>{close();duplicatePhoneBypass=normalizedPhone;$('#noticeForm').requestSubmit();};
   document.body.append(backdrop);
