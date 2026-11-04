@@ -6,7 +6,7 @@ const $$ = (s, root=document) => [...root.querySelectorAll(s)];
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = value => Number(value || 0).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
 const categoryFor = device => /aire acondicionado|aerotermia|bomba de calor|acs|caldera|calentador|termo/i.test(String(device||'')) ? 'Clima' : (device ? 'Gama blanca' : null);
-let user=null, isSuperAdmin=false, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, realtimeCompanyId=null, membershipLoadPromise=null, membershipLoadStage='inicio', noticeSource='landing', fieldScope='phone', noticeView='table', relatedNoticeMatch=null, selectedHistoryKey=null, duplicatePhoneBypass=null;
+let user=null, isSuperAdmin=false, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], appointments=[], calendarConnection=null, realtimeChannel=null, realtimeCompanyId=null, membershipLoadPromise=null, membershipLoadStage='inicio', noticeSource='landing', fieldScope='phone', noticeView='table', relatedNoticeMatch=null, selectedHistoryKey=null, duplicatePhoneBypass=null, agendaMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1), agendaSelectedDate=null, googleCalendarAccessToken=null, googleCalendarAccessExpiresAt=0, googleCalendarAccessCompanyId=null;
 let landingRoutes={}, notificationChannels=[], formDestinations={}, globalFormRoutes=[];
 let landingListCollapsed=localStorage.getItem('crm-landings-list-collapsed')==='true';
 let fieldEditorRows=[],fieldDragSource=null;
@@ -251,11 +251,16 @@ async function loadCompanyData() {
       fetchAllNotices(c),
       db.from('tariffs').select('*').eq('company_id',c),
       db.from('notice_fields').select('*').eq('company_id',c).order('position'),
-      db.from('company_members').select('company_id,user_id,email,role').eq('company_id',c).order('email')
+      db.from('company_members').select('company_id,user_id,email,role').eq('company_id',c).order('email'),
+      db.from('appointments').select('*').eq('company_id',c).order('start_at'),
+      db.from('calendar_connections').select('*').eq('company_id',c).maybeSingle()
     ]);
     membershipLoadStage='validando las respuestas de base de datos';
     for(const r of results)if(r.error)throw r.error;
-    [landings,notices,tariffs,fields,members]=results.map(r=>Array.isArray(r.data)?r.data:[]);
+    [landings,notices,tariffs,fields,members]=results.slice(0,5).map(r=>Array.isArray(r.data)?r.data:[]);
+    appointments=Array.isArray(results[5].data)?results[5].data:[];
+    calendarConnection=results[6].data||null;
+    if(googleCalendarAccessCompanyId!==c){googleCalendarAccessToken=null;googleCalendarAccessExpiresAt=0;googleCalendarAccessCompanyId=null;}
     applyAccessPermissions();
     membershipLoadStage='preparando campos de avisos';
     if(!fields.length){const seeds=['phone','landing'].flatMap(channel=>defaultFields.map(f=>({...f,channel,options:f.options||[],company_id:c})));const {data:createdFields,error}=await db.from('notice_fields').insert(seeds).select();if(error)throw error;fields=createdFields||[];}
@@ -268,6 +273,7 @@ async function loadCompanyData() {
     membershipLoadStage='dibujando informes';renderReport();
     membershipLoadStage='dibujando reclamaciones';renderComplaints();
     membershipLoadStage='dibujando historial';renderClientHistory();
+    membershipLoadStage='dibujando agenda';renderAgenda();
     membershipLoadStage='dibujando campos';renderFields();
     membershipLoadStage='dibujando tarifas';renderPriceRules();
     membershipLoadStage='dibujando empresas';renderCompanyPage();
@@ -284,6 +290,7 @@ async function loadCompanyData() {
     safeRender('limpiando informes',renderReport);
     safeRender('limpiando reclamaciones',renderComplaints);
     safeRender('limpiando historial',renderClientHistory);
+    safeRender('limpiando agenda',renderAgenda);
     safeRender('limpiando campos',renderFields);
     safeRender('limpiando tarifas',renderPriceRules);
     safeRender('limpiando empresas',renderCompanyPage);
@@ -882,6 +889,7 @@ function updateRecordFormMode() {
   const type=$('#fRecordType')?.value||'aviso',nonNotice=type!=='aviso';
   $('#recordTypeWrap').hidden=noticeSource!=='phone'||!nonNotice;
   $('#statusFieldWrap').hidden=noticeSource!=='phone';
+  const appointmentWrap=$('#phoneAppointmentWrap');if(appointmentWrap)appointmentWrap.hidden=noticeSource!=='phone'||nonNotice;
   const status=$('#fStatus'),statusLabel=$('#fStatusLabel');
   if(status&&statusLabel&&nonNotice){
     const previous=status.value;
@@ -937,7 +945,7 @@ async function openPhoneNotice(type='aviso', preselectedId=null) {
     else toast('No encontramos un aviso sacado con ese número en esta empresa. Podrás completar los datos y marcar el resultado.','Sin aviso relacionado');
   }
   relatedNoticeMatch=matched;
-  noticeSource='phone';$('#noticeForm').reset();
+  noticeSource='phone';$('#noticeForm').reset();$('#phoneAppointmentFields').hidden=true;$('#scheduleAppointment').checked=false;
   $('#fRecordType').innerHTML=type==='aviso'?'<option value="aviso">Aviso técnico</option>':'<option value="reclamacion">Reclamación</option><option value="anulacion">Anulación</option>';
   $('#fRecordType').value=type;
   syncDefaultFields();renderExtraFields();updateRecordFormMode();
@@ -988,16 +996,34 @@ async function createNotice(event) {
   $$('[data-custom-key]', $('#noticeForm')).forEach(el=>{const c=$('input,select,textarea',el);custom_fields[el.dataset.customKey]=c.type==='checkbox'?c.checked:c.value;});
   const category=categoryFor(device);
   const row={company_id:currentCompany.id,landing_id:null,notice_type:type,status:v('fStatus')||'Nuevo',customer_name:v('fName'),phone:v('fPhone'),email:$('#fEmail')?.value?.trim()||null,locality:v('fLocality')||null,postal_code:v('fPostal')||null,device:device||null,category:isPhoneNotice?category:null,brand:isPhoneNotice?(v('fBrand')||null):null,issue:v('fIssue')||null,custom_fields,unit_price:0,created_by:user.id};
+  const scheduleAppointment=type==='aviso'&&$('#scheduleAppointment')?.checked;
+  let appointmentDraft=null,savedAppointment=null,appointmentError=null;
+  if(scheduleAppointment){
+    const dateValue=$('#phoneAppointmentStart')?.value;
+    const start=dateValue?new Date(dateValue):null;
+    if(!start||!Number.isFinite(start.getTime())){submitButtons.forEach(button=>button.disabled=false);toast('Indica una fecha y hora válida para la cita.','Falta la fecha');return;}
+    appointmentDraft={company_id:currentCompany.id,start_at:start.toISOString(),duration_minutes:Number($('#phoneAppointmentDuration')?.value||60),customer_name:v('fName'),phone:v('fPhone'),address:$('#phoneAppointmentAddress')?.value?.trim()||v('fLocality')||null,notes:$('#phoneAppointmentNotes')?.value?.trim()||v('fIssue')||null,status:'scheduled',created_by:user.id};
+  }
   if(!isPhoneNotice&&relatedNoticeMatch)row.related_notice_id=relatedNoticeMatch.id;
   if(row.status==='Sale'&&isPhoneNotice)row.unit_price=Number(tariffForNotice(row)?.price||0);
   const {data,error}=await db.from('notices').insert(row).select().single();
   if(error){submitButtons.forEach(button=>button.disabled=false);toast(errorText(error),'No se pudo guardar el aviso');return;}
+  if(appointmentDraft){
+    const result=await db.from('appointments').insert({...appointmentDraft,notice_id:data.id}).select().single();
+    if(result.error)appointmentError=result.error;else savedAppointment=result.data;
+  }
   submitButtons.forEach(button=>button.disabled=false);
   notices.unshift(data);relatedNoticeMatch=null;$('#modal').classList.remove('open');event.target.reset();renderRows();renderComplaints();renderClientHistory();
+  if(savedAppointment){appointments.push(savedAppointment);agendaSelectedDate=localDateKey(savedAppointment.start_at);agendaMonth=new Date(new Date(savedAppointment.start_at).getFullYear(),new Date(savedAppointment.start_at).getMonth(),1);renderAgenda();}
   if(type!=='aviso'&&data.status==='Sale')await sendNoticeToConfiguredIntegrations(data);
   else if(type!=='aviso')toast('Se ha guardado sin enviar: cliente equivocado o llamada ajena a la empresa.','Registro guardado');
   else if(data.status==='Sale')await sendNoticeToConfiguredIntegrations(data);
-  else toast('Teléfono · '+(data.device||'Aviso')+' · '+formatDate(data.received_at),'Aviso guardado en el CRM');
+  let appointmentSyncError=null;
+  if(savedAppointment&&calendarConnection){const sync=await syncAppointmentWithGoogle(savedAppointment);appointmentSyncError=sync?.error||null;}
+  if(appointmentError)toast('El aviso se guardó, pero no se pudo guardar la cita. Puedes crearla desde Agenda. '+errorText(appointmentError),'Aviso guardado');
+  else if(savedAppointment&&appointmentSyncError)toast('Aviso y cita guardados en el CRM; Google Calendar queda pendiente: '+appointmentSyncError,'Sincronización pendiente');
+  else if(savedAppointment)toast(calendarConnection?'Aviso y cita guardados y sincronizados.':'Aviso y cita guardados. Conecta Google Calendar desde Integraciones para sincronizar.','Aviso y cita guardados');
+  else if(type==='aviso'&&data.status!=='Sale')toast('Teléfono · '+(data.device||'Aviso')+' · '+formatDate(data.received_at),'Aviso guardado en el CRM');
 }
 function showSettingsTab(name) {
   $$('[data-settings-tab]').forEach(button=>button.classList.toggle('active',button.dataset.settingsTab===name));
@@ -1174,9 +1200,11 @@ async function renderIntegrations() {
   const section=$('#page-integraciones');if(!section)return;
   const old=$('.demo-banner',section);if(old)old.remove();
   $('#addLanding').onclick=async()=>{const answer=await formDialog({title:'Añadir landing',description:'Conecta un formulario web a esta empresa.',fields:[{key:'name',label:'Nombre de la landing',required:true},{key:'url',label:'URL de la landing',placeholder:'https://ejemplo.com'},{key:'domains',label:'Orígenes permitidos (separados por comas)',placeholder:'https://ejemplo.com'}]});if(!answer?.name.trim())return;const name=answer.name,url=answer.url.trim()||null,domains=answer.domains||'';const allowed_origins=domains.split(',').map(x=>x.trim()).filter(Boolean);const {data,error}=await db.from('landings').insert({company_id:currentCompany.id,name:name.trim(),url,allowed_origins}).select().single();if(error){toast(errorText(error),'No se pudo crear la landing');return;}landings.push(data);landings.sort((a,b)=>a.name.localeCompare(b.name));await loadCompanyData();showLandingCode(data);};
-  $('#providerCards').innerHTML=`<article class="provider-card"><h4>Telegram</h4><p>Avisos normales y un grupo distinto para reclamaciones o anulaciones.</p><div class="button-row"><button class="outline-btn" data-config-channel="telegram">Configurar Telegram</button><button class="outline-btn" data-test-channel="telegram">Enviar prueba</button></div></article><article class="provider-card"><h4>WhatsApp</h4><p>Elige arriba qué avisos quieres recibir por WhatsApp.</p><div class="button-row"><button class="outline-btn" data-config-channel="whatsapp">Configurar WhatsApp</button><button class="outline-btn" data-test-channel="whatsapp">Enviar prueba</button></div></article><article class="provider-card"><h4>Correo electrónico</h4><p>Envía los tipos de aviso seleccionados a los correos configurados.</p><div class="button-row"><button class="outline-btn" data-config-channel="email">Configurar correo</button><button class="outline-btn" data-test-channel="email">Enviar prueba</button></div></article>`;
+  $('#providerCards').innerHTML=`<article class="provider-card"><h4>Telegram</h4><p>Avisos normales y un grupo distinto para reclamaciones o anulaciones.</p><div class="button-row"><button class="outline-btn" data-config-channel="telegram">Configurar Telegram</button><button class="outline-btn" data-test-channel="telegram">Enviar prueba</button></div></article><article class="provider-card"><h4>WhatsApp</h4><p>Elige arriba qué avisos quieres recibir por WhatsApp.</p><div class="button-row"><button class="outline-btn" data-config-channel="whatsapp">Configurar WhatsApp</button><button class="outline-btn" data-test-channel="whatsapp">Enviar prueba</button></div></article><article class="provider-card"><h4>Correo electrónico</h4><p>Envía los tipos de aviso seleccionados a los correos configurados.</p><div class="button-row"><button class="outline-btn" data-config-channel="email">Configurar correo</button><button class="outline-btn" data-test-channel="email">Enviar prueba</button></div></article><article class="provider-card"><h4>Google Calendar</h4><p>Agenda independiente para ${esc(currentCompany?.name||'esta empresa')}. Requiere un OAuth Client ID web de Google Cloud, el origen del CRM autorizado y Calendar API activada.</p><label class="field" style="margin:8px 0"><span>ID de cliente OAuth de Google</span><input id="googleCalendarClientId" value="${esc(calendarConnection?.client_id||'')}" placeholder="...apps.googleusercontent.com" autocomplete="off"/></label><small id="googleCalendarStatus" style="display:block;margin-bottom:8px">${calendarConnection?.google_email?'Conectado a '+esc(calendarConnection.google_email)+' · Autoriza este navegador para sincronizar.':'Sin cuenta conectada.'}</small><div class="button-row"><button type="button" class="outline-btn" id="connectGoogleCalendar">${calendarConnection?'Autorizar este navegador':'Conectar Google Calendar'}</button>${calendarConnection?'<button type="button" class="mini-delete" id="disconnectGoogleCalendar" aria-label="Desconectar Google Calendar">×</button>':''}</div></article>`;
   $$('[data-config-channel]',$('#providerCards')).forEach(b=>b.onclick=()=>configureIntegration(b.dataset.configChannel));
   $$('[data-test-channel]',$('#providerCards')).forEach(b=>b.onclick=()=>testIntegration(b.dataset.testChannel));
+  $('#connectGoogleCalendar')?.addEventListener('click',connectGoogleCalendar);
+  $('#disconnectGoogleCalendar')?.addEventListener('click',disconnectGoogleCalendar);
   await renderNotificationRoutes();
   const host=$('#landingIntegrations');
   const channelNames={telegram:'Telegram',whatsapp:'WhatsApp',email:'Correo'};
@@ -1249,12 +1277,245 @@ async function showLandingCode(landing) {
   $('#copyLandingCode',backdrop).onclick=async()=>{await navigator.clipboard.writeText(code);toast('Ejemplo JavaScript copiado.');};
 }
 
+function localDateKey(value) {
+  const date=value instanceof Date?value:new Date(value);
+  return String(date.getFullYear()).padStart(4,'0')+'-'+String(date.getMonth()+1).padStart(2,'0')+'-'+String(date.getDate()).padStart(2,'0');
+}
+function localDateTimeValue(value) {
+  const date=value?new Date(value):new Date();
+  return new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);
+}
+function appointmentTime(value) {
+  return new Intl.DateTimeFormat('es-ES',{hour:'2-digit',minute:'2-digit'}).format(new Date(value));
+}
+function appointmentDateLabel(value,options={weekday:'long',day:'numeric',month:'long'}) {
+  return new Intl.DateTimeFormat('es-ES',options).format(new Date(value));
+}
+function renderAgenda() {
+  const grid=$('#agendaCalendarGrid');if(!grid)return;
+  if(!agendaSelectedDate)agendaSelectedDate=localDateKey(new Date());
+  const year=agendaMonth.getFullYear(),month=agendaMonth.getMonth();
+  const monthLabel=$('#agendaMonthLabel');if(monthLabel)monthLabel.textContent=new Intl.DateTimeFormat('es-ES',{month:'long',year:'numeric'}).format(agendaMonth);
+  const monthStart=new Date(year,month,1,12),offset=(monthStart.getDay()+6)%7;
+  const gridStart=new Date(year,month,1-offset,12);
+  const today=localDateKey(new Date());
+  grid.innerHTML=Array.from({length:42},(_,index)=>{
+    const date=new Date(gridStart);date.setDate(gridStart.getDate()+index);
+    const key=localDateKey(date),items=appointments.filter(a=>localDateKey(a.start_at)===key).sort((a,b)=>new Date(a.start_at)-new Date(b.start_at));
+    const chips=items.slice(0,2).map(a=>'<span class="agenda-day-chip '+(a.status==='cancelled'?'cancelled':a.status==='completed'?'completed':'')+'">'+appointmentTime(a.start_at)+' '+esc(a.customer_name)+'</span>').join('');
+    const more=items.length>2?'<small class="agenda-more">+'+(items.length-2)+' más</small>':'';
+    const classes=['agenda-day-cell',date.getMonth()!==month?'other-month':'',key===today?'today':'',key===agendaSelectedDate?'selected':''].filter(Boolean).join(' ');
+    return '<button type="button" class="'+classes+'" data-agenda-date="'+key+'"><span class="agenda-day-number">'+date.getDate()+'</span>'+chips+more+'</button>';
+  }).join('');
+  const selected=$('#agendaDayLabel');if(selected)selected.textContent=appointmentDateLabel(new Date(agendaSelectedDate+'T12:00:00'),{weekday:'long',day:'numeric',month:'long'});
+  const dayList=$('#agendaDayEvents'),dayCount=$('#agendaDayCount');
+  const daily=appointments.filter(a=>localDateKey(a.start_at)===agendaSelectedDate).sort((a,b)=>new Date(a.start_at)-new Date(b.start_at));
+  if(dayCount)dayCount.textContent=daily.length+' '+(daily.length===1?'cita':'citas');
+  if(dayList)dayList.innerHTML=daily.map(a=>{
+    const status=a.status==='cancelled'?'Anulada':a.status==='completed'?'Realizada':'Programada';
+    const sync=a.google_event_id?'Sincronizada con Google Calendar':a.google_sync_error?'Pendiente de sincronizar con Google Calendar':'';
+    const duration=Number(a.duration_minutes)||60;
+    return '<article class="agenda-event '+(a.status==='cancelled'?'cancelled':a.status==='completed'?'completed':'')+'"><div class="agenda-event-time">'+appointmentTime(a.start_at)+'<small>'+duration+' min</small></div><div class="agenda-event-info"><strong>'+esc(a.customer_name)+'</strong><span>'+esc(a.phone)+'</span><span>'+esc(a.address||'Sin dirección indicada')+'</span><span>'+esc(a.notes||'')+'</span><small>'+status+(sync?' · '+sync:'')+'</small></div><div class="agenda-event-actions"><button type="button" class="outline-btn" data-edit-appointment="'+esc(a.id)+'">Editar</button>'+(a.status==='scheduled'?'<button type="button" class="outline-btn" data-complete-appointment="'+esc(a.id)+'">Realizada</button><button type="button" class="outline-btn" data-cancel-appointment="'+esc(a.id)+'">Anular</button>':'')+(a.status==='cancelled'?'<button type="button" class="outline-btn" data-reopen-appointment="'+esc(a.id)+'">Reprogramar</button>':'')+'<button type="button" class="mini-delete" data-delete-appointment="'+esc(a.id)+'" aria-label="Eliminar cita">×</button></div></article>';
+  }).join('')||'<div class="empty">No hay citas para este día.</div>';
+  $$('[data-agenda-date]',grid).forEach(button=>button.onclick=()=>{agendaSelectedDate=button.dataset.agendaDate;renderAgenda();});
+  $$('[data-edit-appointment]',dayList).forEach(button=>button.onclick=()=>openAppointmentDialog(appointments.find(a=>a.id===button.dataset.editAppointment)));
+  $$('[data-complete-appointment]',dayList).forEach(button=>button.onclick=()=>setAppointmentStatus(button.dataset.completeAppointment,'completed'));
+  $$('[data-cancel-appointment]',dayList).forEach(button=>button.onclick=()=>setAppointmentStatus(button.dataset.cancelAppointment,'cancelled'));
+  $$('[data-reopen-appointment]',dayList).forEach(button=>button.onclick=()=>{const appointment=appointments.find(a=>a.id===button.dataset.reopenAppointment);if(appointment)openAppointmentDialog(appointment,{status:'scheduled'});});
+  $$('[data-delete-appointment]',dayList).forEach(button=>button.onclick=()=>deleteAppointment(button.dataset.deleteAppointment));
+}
+async function openAppointmentDialog(existing=null,overrides={}) {
+  const source=existing||{};
+  const answer=await formDialog({
+    title:existing?'Editar cita':'Agendar cita',
+    description:'Esta cita pertenece únicamente a '+(currentCompany?.name||'la empresa seleccionada')+'.',
+    fields:[
+      {key:'customer_name',label:'Cliente',value:source.customer_name||'',required:true},
+      {key:'phone',label:'Teléfono',type:'tel',value:source.phone||'',required:true},
+      {key:'start_at',label:'Fecha y hora',type:'datetime-local',value:localDateTimeValue(source.start_at||defaultAppointmentStart()),required:true},
+      {key:'duration_minutes',label:'Duración en minutos',type:'number',value:source.duration_minutes||60,required:true},
+      {key:'address',label:'Dirección de la cita',value:source.address||''},
+      {key:'notes',label:'Notas para el técnico',type:'textarea',value:source.notes||''},
+      {key:'status',label:'Estado',type:'select',value:overrides.status||((source.status==='cancelled')?'scheduled':source.status||'scheduled'),options:[{value:'scheduled',label:'Programada'},{value:'completed',label:'Realizada'}]}
+    ]
+  });
+  if(!answer)return;
+  const start=new Date(answer.start_at);
+  if(!Number.isFinite(start.getTime())){toast('Indica una fecha y hora válidas.','Fecha no válida');return;}
+  const payload={
+    company_id:currentCompany.id,
+    notice_id:source.notice_id||overrides.notice_id||null,
+    customer_name:answer.customer_name.trim(),
+    phone:answer.phone.trim(),
+    start_at:start.toISOString(),
+    duration_minutes:Math.max(15,Math.min(480,Number(answer.duration_minutes)||60)),
+    address:answer.address.trim()||null,
+    notes:answer.notes.trim()||null,
+    status:answer.status||'scheduled',
+    updated_at:new Date().toISOString()
+  };
+  let record,error;
+  if(existing){
+    const result=await db.from('appointments').update(payload).eq('id',existing.id).select().single();
+    record=result.data;error=result.error;
+  }else{
+    payload.created_by=user.id;
+    const result=await db.from('appointments').insert(payload).select().single();
+    record=result.data;error=result.error;
+  }
+  if(error){toast(errorText(error),existing?'No se pudo cambiar la cita':'No se pudo guardar la cita');return;}
+  if(existing)Object.assign(existing,record);else appointments.push(record);
+  agendaSelectedDate=localDateKey(record.start_at);agendaMonth=new Date(new Date(record.start_at).getFullYear(),new Date(record.start_at).getMonth(),1);
+  renderAgenda();
+  let sync=null;
+  if(calendarConnection)sync=await syncAppointmentWithGoogle(record);
+  if(sync?.error)toast('La cita se guardó en la agenda del CRM, pero Google Calendar no se actualizó: '+sync.error,'Cita guardada');
+  else toast(existing?'Cita actualizada.':'Cita agendada.');
+}
+function defaultAppointmentStart() {
+  const date=new Date();date.setMinutes(0,0,0);date.setHours(date.getHours()+1);return date;
+}
+async function setAppointmentStatus(id,status) {
+  const appointment=appointments.find(a=>a.id===id);if(!appointment)return;
+  if(status==='cancelled'&&!await confirmDialog('¿Anular la cita de '+appointment.customer_name+'? Si Google Calendar está conectado, también se eliminará allí.'))return;
+  const {data,error}=await db.from('appointments').update({status,updated_at:new Date().toISOString()}).eq('id',id).select().single();
+  if(error){toast(errorText(error),'No se pudo cambiar el estado');return;}
+  Object.assign(appointment,data);renderAgenda();
+  const sync=calendarConnection?await syncAppointmentWithGoogle(appointment):null;
+  if(sync?.error)toast('El cambio se guardó en el CRM, pero Google Calendar no se actualizó: '+sync.error,'Sincronización pendiente');
+  else toast(status==='cancelled'?'Cita anulada.':'Cita marcada como realizada.');
+}
+async function deleteAppointment(id) {
+  const appointment=appointments.find(a=>a.id===id);if(!appointment)return;
+  if(!await confirmDialog('¿Eliminar definitivamente la cita de '+appointment.customer_name+' del CRM? Esta acción no se puede deshacer.'))return;
+  if(appointment.google_event_id&&calendarConnection){
+    if(!hasGoogleCalendarToken()){toast('Antes de borrar esta cita, vuelve a autorizar Google Calendar en Integraciones para eliminarla también allí.','Google Calendar necesita autorización');return;}
+    const sync=await syncAppointmentWithGoogle(appointment,'delete');
+    if(sync?.error){toast('No se borró la cita porque Google Calendar no confirmó la eliminación: '+sync.error,'No se pudo eliminar');return;}
+  }
+  const {error}=await db.from('appointments').delete().eq('id',id);
+  if(error){toast(errorText(error),'No se pudo eliminar');return;}
+  appointments=appointments.filter(a=>a.id!==id);renderAgenda();toast('Cita eliminada.');
+}
+function hasGoogleCalendarToken() {
+  return !!(googleCalendarAccessToken&&googleCalendarAccessCompanyId===currentCompany?.id&&googleCalendarAccessExpiresAt>Date.now()+30000);
+}
+function requestGoogleCalendarToken(clientId,prompt='select_account') {
+  if(!window.google?.accounts?.oauth2)return Promise.reject(new Error('No se ha cargado Google Identity Services. Recarga la página e inténtalo otra vez.'));
+  return new Promise((resolve,reject)=>{
+    let completed=false;
+    const finish=(fn,value)=>{if(completed)return;completed=true;clearTimeout(timeout);fn(value);};
+    const timeout=setTimeout(()=>finish(reject,new Error('No se completó la autorización de Google.')) ,120000);
+    const client=window.google.accounts.oauth2.initTokenClient({
+      client_id:clientId,
+      scope:'openid email https://www.googleapis.com/auth/calendar.events',
+      callback:response=>{
+        if(response.error){finish(reject,new Error(response.error_description||response.error));return;}
+        googleCalendarAccessToken=response.access_token;
+        googleCalendarAccessExpiresAt=Date.now()+(Number(response.expires_in)||3600)*1000;
+        googleCalendarAccessCompanyId=currentCompany.id;
+        finish(resolve,response.access_token);
+      },
+      error_callback:error=>finish(reject,new Error(error?.message||'Google no completó la autorización.'))
+    });
+    client.requestAccessToken({prompt,include_granted_scopes:true});
+  });
+}
+async function connectGoogleCalendar() {
+  const clientId=$('#googleCalendarClientId')?.value?.trim()||'';
+  if(!clientId){toast('Pega primero el ID de cliente OAuth de Google Cloud.','Falta el ID de Google');return;}
+  if(!clientId.endsWith('.apps.googleusercontent.com')){toast('El ID de cliente no parece válido.','Revisa el ID de Google');return;}
+  let tokenPromise;
+  try{tokenPromise=requestGoogleCalendarToken(clientId,'select_account');}
+  catch(error){toast(errorText(error),'No se pudo conectar Google Calendar');return;}
+  try{
+    const token=await tokenPromise;
+    const profileResponse=await fetch('https://www.googleapis.com/oauth2/v3/userinfo',{headers:{Authorization:'Bearer '+token}});
+    if(!profileResponse.ok)throw new Error('Google no devolvió el correo de la cuenta.');
+    const profile=await profileResponse.json();
+    const connection={company_id:currentCompany.id,client_id:clientId,calendar_id:calendarConnection?.calendar_id||'primary',google_email:profile.email||null,connected_at:new Date().toISOString(),updated_at:new Date().toISOString()};
+    const {data,error}=await db.from('calendar_connections').upsert(connection,{onConflict:'company_id'}).select().single();
+    if(error)throw error;
+    calendarConnection=data;renderIntegrations();toast('Google Calendar conectado a '+(profile.email||'la empresa')+'.','Integración lista');
+    await syncPendingCalendarAppointments();
+  }catch(error){toast(errorText(error),'No se pudo conectar Google Calendar');}
+}
+async function disconnectGoogleCalendar() {
+  if(!calendarConnection)return;
+  if(!await confirmDialog('Se desconectará Google Calendar de esta empresa. Las citas ya sincronizadas no se borrarán de Google.'))return;
+  if(googleCalendarAccessToken&&googleCalendarAccessCompanyId===currentCompany?.id&&window.google?.accounts?.oauth2){
+    try{window.google.accounts.oauth2.revoke(googleCalendarAccessToken,()=>{});}catch(_){}
+  }
+  const {error}=await db.from('calendar_connections').delete().eq('company_id',currentCompany.id);
+  if(error){toast(errorText(error),'No se pudo desconectar');return;}
+  calendarConnection=null;googleCalendarAccessToken=null;googleCalendarAccessExpiresAt=0;googleCalendarAccessCompanyId=null;
+  renderIntegrations();toast('Google Calendar desconectado.');
+}
+function calendarEventBody(appointment) {
+  const end=new Date(new Date(appointment.start_at).getTime()+(Number(appointment.duration_minutes)||60)*60000);
+  return {
+    summary:'Cita de reparación · '+appointment.customer_name,
+    location:appointment.address||'',
+    description:['Cliente: '+appointment.customer_name,'Teléfono: '+appointment.phone,appointment.notes||''].filter(Boolean).join('\n'),
+    start:{dateTime:new Date(appointment.start_at).toISOString(),timeZone:'Europe/Madrid'},
+    end:{dateTime:end.toISOString(),timeZone:'Europe/Madrid'}
+  };
+}
+async function googleCalendarRequest(url,method,body) {
+  if(!hasGoogleCalendarToken())throw new Error('La autorización de Google ha caducado. Pulsa «Conectar Google Calendar» en Integraciones y vuelve a sincronizar.');
+  const response=await fetch(url,{method,headers:{Authorization:'Bearer '+googleCalendarAccessToken,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
+  if(response.status===204)return null;
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok)throw new Error(data.error?.message||'Google Calendar rechazó la operación ('+response.status+').');
+  return data;
+}
+async function syncAppointmentWithGoogle(appointment,action='save') {
+  if(!calendarConnection)return {skipped:true};
+  try{
+    const calendarId=encodeURIComponent(calendarConnection.calendar_id||'primary');
+    let eventId=appointment.google_event_id||null;
+    if(action==='delete'||appointment.status==='cancelled'){
+      if(eventId)await googleCalendarRequest('https://www.googleapis.com/calendar/v3/calendars/'+calendarId+'/events/'+encodeURIComponent(eventId),'DELETE');
+      eventId=null;
+    }else{
+      let event;
+      if(eventId){
+        try{event=await googleCalendarRequest('https://www.googleapis.com/calendar/v3/calendars/'+calendarId+'/events/'+encodeURIComponent(eventId),'PUT',calendarEventBody(appointment));}
+        catch(error){if(!String(error.message).includes('(404)'))throw error;event=await googleCalendarRequest('https://www.googleapis.com/calendar/v3/calendars/'+calendarId+'/events','POST',calendarEventBody(appointment));}
+      }else event=await googleCalendarRequest('https://www.googleapis.com/calendar/v3/calendars/'+calendarId+'/events','POST',calendarEventBody(appointment));
+      eventId=event.id;
+    }
+    const patch={google_event_id:eventId,google_sync_error:null,google_synced_at:new Date().toISOString(),updated_at:new Date().toISOString()};
+    const {data,error}=await db.from('appointments').update(patch).eq('id',appointment.id).select().single();
+    if(error)throw error;
+    Object.assign(appointment,data);
+    return {ok:true};
+  }catch(error){
+    const message=errorText(error);
+    const {data}=await db.from('appointments').update({google_sync_error:message,updated_at:new Date().toISOString()}).eq('id',appointment.id).select().single();
+    if(data)Object.assign(appointment,data);
+    return {error:message};
+  }
+}
+async function syncPendingCalendarAppointments() {
+  let synced=0,failed=0;
+  for(const appointment of [...appointments]){
+    const pending=appointment.status==='cancelled'?!!appointment.google_event_id:(!appointment.google_event_id||!!appointment.google_sync_error);
+    if(!pending)continue;
+    const result=await syncAppointmentWithGoogle(appointment);
+    if(result.error)failed++;else if(result.ok)synced++;
+  }
+  renderAgenda();
+  if(failed)toast('Se sincronizaron '+synced+' citas; '+failed+' necesitan revisión.','Sincronización parcial');
+  else toast('Agenda sincronizada con Google Calendar.','Sincronización lista');
+}
+
 function showPage(name) {
-  if(!isSuperAdmin&&!['avisos-landing','avisos-phone','informes','reclamaciones','historial'].includes(name))return;
+  if(!isSuperAdmin&&!['avisos-landing','avisos-phone','informes','reclamaciones','historial','agenda'].includes(name))return;
   const pageName=(name==='avisos-landing'||name==='avisos-phone')?'avisos':name;
   $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+pageName));
   $$('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
-  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',reclamaciones:'Reclamaciones o anulaciones',historial:'Historial de clientes',empresas:'Empresas',usuarios:'Usuarios y permisos',personalizacion:'Personalización',configuracion:'Configuración',integraciones:'Integraciones'};
+  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',reclamaciones:'Reclamaciones o anulaciones',historial:'Historial de clientes',agenda:'Agenda',empresas:'Empresas',usuarios:'Usuarios y permisos',personalizacion:'Personalización',configuracion:'Configuración',integraciones:'Integraciones'};
   $('#breadcrumb').textContent='Panel / '+labels[name];
   if(pageName==='avisos'){
     noticeSource=name==='avisos-phone'?'phone':'landing';
@@ -1268,6 +1529,7 @@ function showPage(name) {
   }
   if(pageName==='reclamaciones')renderComplaints();
   if(pageName==='historial')renderClientHistory();
+  if(pageName==='agenda')renderAgenda();
   $('#sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'});
 }
 function wireUI() {
@@ -1282,6 +1544,12 @@ function wireUI() {
   $('#cardFieldsToggle').addEventListener('click',()=>{$('#cardFieldPanel').hidden=!$('#cardFieldPanel').hidden;});
   $('#newNotice').addEventListener('click',()=>openPhoneNotice('aviso'));
   $('#newComplaint').addEventListener('click',()=>openPhoneNotice('reclamacion'));
+  $('#agendaPrev').addEventListener('click',()=>{agendaMonth=new Date(agendaMonth.getFullYear(),agendaMonth.getMonth()-1,1);renderAgenda();});
+  $('#agendaNext').addEventListener('click',()=>{agendaMonth=new Date(agendaMonth.getFullYear(),agendaMonth.getMonth()+1,1);renderAgenda();});
+  $('#agendaToday').addEventListener('click',()=>{agendaSelectedDate=localDateKey(new Date());agendaMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1);renderAgenda();});
+  $('#newAppointment').addEventListener('click',()=>openAppointmentDialog());
+  $('#scheduleAppointment').addEventListener('change',event=>{const fields=$('#phoneAppointmentFields');if(fields)fields.hidden=!event.target.checked;const date=$('#phoneAppointmentStart');if(event.target.checked&&date&&!date.value)date.value=localDateTimeValue(defaultAppointmentStart());});
+
   $('#fRecordType').addEventListener('change',()=>{syncDefaultFields();renderExtraFields();updateRecordFormMode();});
   $('#fStatus').addEventListener('change',updateRecordSubmitLabel);
   $('#closeModal').addEventListener('click',()=>$('#modal').classList.remove('open'));
