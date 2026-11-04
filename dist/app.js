@@ -275,20 +275,21 @@ async function loadCompanyData() {
     membershipLoadStage='dibujando configuración';renderSettings();
     membershipLoadStage='cargando usuario';mountSignOut();
   } catch(error) {
-    const originalStage=membershipLoadStage;
-    landings=[];notices=[];tariffs=[];fields=[];
+    const originalStage=membershipLoadStage, originalMessage=errorText(error);
+    console.error('Error al cargar datos de empresa',originalStage,error);
     Array.from(document.querySelectorAll('.demo-banner')).forEach(el=>el.remove());
-    membershipLoadStage='limpiando tabla de avisos';renderLandingOptions();renderRows();
-    membershipLoadStage='limpiando informes';renderReport();
-    membershipLoadStage='limpiando reclamaciones';renderComplaints();
-    membershipLoadStage='limpiando historial';renderClientHistory();
-    membershipLoadStage='limpiando campos';renderFields();
-    membershipLoadStage='limpiando tarifas';renderPriceRules();
-    membershipLoadStage='limpiando empresas';renderCompanyPage();
-    membershipLoadStage='limpiando usuarios';renderMembers();
-    membershipLoadStage='limpiando integraciones';renderIntegrations();
-    membershipLoadStage='limpiando configuración';renderSettings();
-    const message='No se pudieron cargar los datos de esta empresa ('+originalStage+'): '+errorText(error);
+    const safeRender=(stage,fn)=>{membershipLoadStage=stage;try{fn();}catch(renderError){console.error('Error al limpiar vista tras fallo',stage,renderError);}};
+    safeRender('limpiando tabla de avisos',()=>{renderLandingOptions();renderRows();});
+    safeRender('limpiando informes',renderReport);
+    safeRender('limpiando reclamaciones',renderComplaints);
+    safeRender('limpiando historial',renderClientHistory);
+    safeRender('limpiando campos',renderFields);
+    safeRender('limpiando tarifas',renderPriceRules);
+    safeRender('limpiando empresas',renderCompanyPage);
+    safeRender('limpiando usuarios',renderMembers);
+    safeRender('limpiando integraciones',renderIntegrations);
+    safeRender('limpiando configuración',renderSettings);
+    const message='No se pudieron cargar los datos de esta empresa ('+originalStage+'): '+originalMessage;
     setConnectionError(message);toast(message,'Error de conexión');
   }
 }
