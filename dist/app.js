@@ -596,7 +596,7 @@ async function handleNoticeStatusChange(id,status,select){
     reason=await requestNoSaleReason(notice.management_reason||'');
     if(reason===null){if(select)select.value=notice.status||'Nuevo';else renderRows();return;}
   }
-  const saved=await changeStatus(id,status,reason);
+  const saved=await changeStatus(id,effectiveStatus,reason);
   if(!saved){if(select)select.value=notice.status||'Nuevo';else renderRows();}
 }
 async function deleteNotice(id){
@@ -704,7 +704,7 @@ function openPendingNotices(status='Nuevo') {
   host.addEventListener('change',event=>{
     const select=event.target.closest('[data-pending-result]');if(!select)return;
     backdrop.dataset.pendingResult=select.value;
-    const schedule=$('[data-pending-schedule]',host);if(schedule)schedule.hidden=select.value!=='Sale';
+    const schedule=$('[data-pending-schedule]',host);if(schedule)schedule.hidden=select.value==='No sale';
   });
   host.addEventListener('click',async e=>{
     const open=e.target.closest('[data-pending-open]');
@@ -719,7 +719,8 @@ function openPendingNotices(status='Nuevo') {
       const notice=notices.find(item=>item.id===id);
       if(!notice||!canManageCurrentNotices())return;
       const status=backdrop.dataset.pendingResult||notice.status||'Nuevo';
-      if(scheduleButton&&status!=='Sale')return;
+      if(scheduleButton&&status==='No sale')return;
+      const effectiveStatus=scheduleButton?'Sale':status;
       let reason=null;
       if(status==='No sale'){
         const filter=backdrop.dataset.pendingStatus||'Nuevo';
@@ -732,7 +733,7 @@ function openPendingNotices(status='Nuevo') {
       if(scheduleButton)scheduleButton.textContent='Guardando…';
       const saved=await changeStatus(id,status,reason);
       if(saved){
-        if(scheduleButton&&status==='Sale'){close();toast('Aviso sacado. Puedes completar la cita.','Aviso actualizado');await openAppointmentDialog(null,{notice_id:id});}
+        if(scheduleButton){close();toast('Aviso sacado. Puedes completar la cita.','Aviso actualizado');await openAppointmentDialog(null,{notice_id:id});}
         else {toast(status==='Sale'?'Aviso marcado como sacado.':status==='No sale'?'Aviso marcado como no sacado.':'Aviso guardado como pendiente.','Gestión actualizada');if(backdrop.isConnected)renderPendingNoticeList(backdrop);}
       } else if(backdrop.isConnected)renderPendingNoticeDetail(backdrop,id);
       return;
@@ -773,7 +774,7 @@ function renderPendingNoticeDetail(backdrop,id) {
   const extras=Object.entries(n.custom_fields||{}).filter(([key])=>!['customer_name','phone','email','locality','postal_code','device','brand','issue'].includes(key)).map(([key,value])=>pendingDetailRow(fields.find(f=>f.field_key===key)?.label||key,value,false)).join('');
   const canManage=canManageCurrentNotices();
   const resultControl='<label class="pending-result-select field"><span>Resultado de la llamada</span><select data-pending-result '+(canManage?'':'disabled')+'><option value="Nuevo" '+((n.status||'Nuevo')==='Nuevo'?'selected':'')+'>Pendiente</option><option value="Sale" '+(n.status==='Sale'?'selected':'')+'>Aviso sacado</option><option value="No sale" '+(n.status==='No sale'?'selected':'')+'>Aviso no sacado</option></select></label>';
-  const resultActions='<div class="pending-status-actions"><button type="button" class="outline-btn" data-pending-save '+(canManage?'':'disabled')+'>Guardar aviso</button><button type="button" class="primary-btn" data-pending-schedule '+(n.status==='Sale'&&canManage?'':'hidden')+' '+(canManage?'':'disabled')+'>Guardar y agendar</button></div>';
+  const resultActions='<div class="pending-status-actions"><button type="button" class="outline-btn" data-pending-save '+(canManage?'':'disabled')+'>Guardar aviso</button><button type="button" class="primary-btn" data-pending-schedule '+(n.status!=='No sale'&&canManage?'':'hidden')+' '+(canManage?'':'disabled')+'>Guardar y agendar</button></div>';
   host.innerHTML='<button type="button" class="pending-back" data-pending-back>‹ Volver a avisos</button><div class="pending-detail-grid">'
     +pendingDetailRow('Cliente',n.customer_name,false)+pendingDetailRow('Teléfono',n.phone,false)
     +pendingDetailRow('Correo',n.email,false)+pendingDetailRow('Origen',origin,false)
