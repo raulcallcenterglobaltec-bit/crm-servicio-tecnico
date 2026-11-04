@@ -713,12 +713,11 @@ function openPendingNotices(status='Nuevo') {
   document.addEventListener('keydown',onKey);
   document.body.append(backdrop);
   const host=$('.pending-content',backdrop);
-  host.addEventListener('change',event=>{
-    const select=event.target.closest('[data-pending-result]');if(!select)return;
-    backdrop.dataset.pendingResult=select.value;
-    const schedule=$('[data-pending-schedule]',host);if(schedule)schedule.hidden=select.value==='No sale';
-  });
-  host.addEventListener('click',async e=>{
+    host.addEventListener('click',async e=>{
+    const resultOption=e.target.closest('[data-pending-result-option]');
+    if(resultOption){const value=resultOption.dataset.pendingResultOption;backdrop.dataset.pendingResult=value;const label=$('[data-pending-result-label]',host);if(label)label.textContent=value==='Sale'?'Aviso sacado':value==='No sale'?'Aviso no sacado':'Pendiente';const menu=$('[data-pending-result-menu]',host);if(menu)menu.hidden=true;const trigger=$('[data-pending-result-trigger]',host);if(trigger)trigger.setAttribute('aria-expanded','false');const schedule=$('[data-pending-schedule]',host);if(schedule)schedule.hidden=value==='No sale';return;}
+    const resultTrigger=e.target.closest('[data-pending-result-trigger]');
+    if(resultTrigger){const menu=$('[data-pending-result-menu]',host);if(menu){menu.hidden=!menu.hidden;resultTrigger.setAttribute('aria-expanded',String(!menu.hidden));}return;}
     const open=e.target.closest('[data-pending-open]');
     if(open){renderPendingNoticeDetail(backdrop,open.getAttribute('data-pending-open'));return;}
     if(e.target.closest('[data-pending-back]')){renderPendingNoticeList(backdrop);return;}
@@ -730,7 +729,7 @@ function openPendingNotices(status='Nuevo') {
     if(saveButton||scheduleButton){
       const notice=notices.find(item=>item.id===id);
       if(!notice||!canManageCurrentNotices())return;
-      const status=canonicalNoticeStatus($('[data-pending-result]',host)?.value||notice.status||'Nuevo');
+      const status=canonicalNoticeStatus(backdrop.dataset.pendingResult||notice.status||'Nuevo');
       if(scheduleButton&&status==='No sale')return;
       const effectiveStatus=scheduleButton?'Sale':status;
       let reason=null;
@@ -785,7 +784,9 @@ function renderPendingNoticeDetail(backdrop,id) {
   const origin=n.created_by?'Teléfono':landingName(n.landing_id);
   const extras=Object.entries(n.custom_fields||{}).filter(([key])=>!['customer_name','phone','email','locality','postal_code','device','brand','issue'].includes(key)).map(([key,value])=>pendingDetailRow(fields.find(f=>f.field_key===key)?.label||key,value,false)).join('');
   const canManage=canManageCurrentNotices();
-  const resultControl='<label class="pending-result-select field"><span>Resultado de la llamada</span><select data-pending-result '+(canManage?'':'disabled')+'><option value="Nuevo" '+((n.status||'Nuevo')==='Nuevo'?'selected':'')+'>Pendiente</option><option value="Sale" '+(n.status==='Sale'?'selected':'')+'>Aviso sacado</option><option value="No sale" '+(n.status==='No sale'?'selected':'')+'>Aviso no sacado</option></select></label>';
+  const selectedResult=n.status==='Sale'?'Sale':n.status==='No sale'?'No sale':'Nuevo';
+  const selectedResultLabel=selectedResult==='Sale'?'Aviso sacado':selectedResult==='No sale'?'Aviso no sacado':'Pendiente';
+  const resultControl='<div class="pending-result-select field"><span>Resultado de la llamada</span><div style="position:relative"><button type="button" class="outline-btn" data-pending-result-trigger aria-expanded="false" '+(canManage?'':'disabled')+' style="width:100%;display:flex;justify-content:space-between;align-items:center;text-align:left"><span data-pending-result-label>'+selectedResultLabel+'</span><span aria-hidden="true">▾</span></button><div data-pending-result-menu hidden style="position:absolute;z-index:5;top:calc(100% + 4px);left:0;right:0;background:#fff;border:1px solid #e5e9f1;border-radius:8px;box-shadow:0 8px 20px rgba(24,34,53,.14);padding:4px">'+[['Nuevo','Pendiente'],['Sale','Aviso sacado'],['No sale','Aviso no sacado']].map(([value,label])=>'<button type="button" data-pending-result-option="'+value+'" '+(canManage?'':'disabled')+' style="display:block;width:100%;border:0;background:#fff;text-align:left;padding:9px 10px;border-radius:6px;color:#536077;cursor:pointer">'+label+'</button>').join('')+'</div></div></div>';
   const resultActions='<div class="pending-status-actions"><button type="button" class="outline-btn" data-pending-save '+(canManage?'':'disabled')+'>Guardar aviso</button><button type="button" class="primary-btn" data-pending-schedule '+(n.status!=='No sale'&&canManage?'':'hidden')+' '+(canManage?'':'disabled')+'>Guardar y agendar</button></div>';
   host.innerHTML='<button type="button" class="pending-back" data-pending-back>‹ Volver a avisos</button><div class="pending-detail-grid">'
     +pendingDetailRow('Cliente',n.customer_name,false)+pendingDetailRow('Teléfono',n.phone,false)
