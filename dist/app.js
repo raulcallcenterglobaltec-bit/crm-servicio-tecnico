@@ -6,7 +6,7 @@ const $$ = (s, root=document) => [...root.querySelectorAll(s)];
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = value => Number(value || 0).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
 const categoryFor = device => /aire acondicionado|aerotermia|bomba de calor|acs|caldera|calentador|termo/i.test(String(device||'')) ? 'Clima' : (device ? 'Gama blanca' : null);
-let user=null, isSuperAdmin=false, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, realtimeCompanyId=null, membershipLoadPromise=null, membershipLoadStage='inicio', noticeSource='landing', fieldScope='phone', noticeView='table', relatedNoticeMatch=null, selectedHistoryKey=null;
+let user=null, isSuperAdmin=false, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, realtimeCompanyId=null, membershipLoadPromise=null, membershipLoadStage='inicio', noticeSource='landing', fieldScope='phone', noticeView='table', relatedNoticeMatch=null, selectedHistoryKey=null, duplicatePhoneBypass=null;
 let landingRoutes={}, notificationChannels=[], formDestinations={}, globalFormRoutes=[];
 let landingListCollapsed=localStorage.getItem('crm-landings-list-collapsed')==='true';
 let fieldEditorRows=[];
@@ -894,9 +894,10 @@ function findPreviousNoticesByPhone(value) {
   return notices.filter(n=>n.notice_type==='aviso'&&n.status==='Sale'&&normalizePhoneForMatch(n.phone)===phone)
     .sort((a,b)=>new Date(b.received_at)-new Date(a.received_at));
 }
-async function openPhoneNotice(type='aviso') {
-  let lookupPhone='',matched=null;
-  if(type!=='aviso') {
+async function openPhoneNotice(type='aviso', preselectedId=null) {
+  const preset=preselectedId?notices.find(n=>n.id===preselectedId&&n.notice_type==='aviso'&&n.status==='Sale'):null;
+  let lookupPhone=preset?.phone||'',matched=preset||null;
+  if(type!=='aviso'&&!matched) {
     const answer=await formDialog({title:'Buscar aviso anterior',description:'¿Qué número de teléfono facilitó al dar el aviso? Buscaremos un aviso técnico marcado como sacado en esta empresa.',fields:[{key:'phone',label:'Número de teléfono que facilitó al dar el aviso',type:'tel',required:true}],confirmText:'Buscar aviso'});
     if(!answer)return;
     lookupPhone=answer.phone.trim();const previousNotices=findPreviousNoticesByPhone(lookupPhone);
@@ -924,12 +925,41 @@ async function openPhoneNotice(type='aviso') {
   } else {const hint=$('#relatedNoticeHint');if(hint)hint.hidden=true;}
   $('#modal').classList.add('open');$('#fName').focus();
 }
+function showDuplicatePhoneDialog(matches,normalizedPhone,currentDevice) {
+  const backdrop=document.createElement('div');backdrop.className='modal-backdrop open';
+  const highest=[...document.querySelectorAll('.modal-backdrop')].reduce((max,el)=>Math.max(max,Number(el.style.zIndex)||0),100);
+  backdrop.style.zIndex=String(highest+20);
+  const key=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+  const currentDeviceKey=key(currentDevice);
+  const rows=matches.slice(0,12).map(n=>{
+    const device=n.device||n.category||'Aparato sin indicar';
+    const sameDevice=!!currentDeviceKey&&key(n.device||n.category)===currentDeviceKey;
+    const status=n.status==='Sale'?'Aviso sacado':n.status==='No sale'?'Aviso no sacado':'Nuevo / pendiente';
+    return '<article style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px;border:1px solid #e3e8f1;border-radius:10px;background:#fff"><div style="min-width:0"><strong>'+esc(device)+'</strong><div style="font-size:12px;color:#5d6a7e;margin-top:4px">'+esc(n.issue||'Sin avería indicada')+' · '+esc(formatDate(n.received_at))+'</div><small style="color:#8791a2">'+esc(status)+' · '+esc(n.customer_name||'Sin nombre')+'</small></div><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><button type="button" class="outline-btn" data-duplicate-view="'+esc(n.id)+'">Ver aviso</button>'+(sameDevice&&n.status==='Sale'?'<button type="button" class="outline-btn" data-duplicate-claim="'+esc(n.id)+'">Abrir reclamación</button>':'')+'</div></article>';
+  }).join('');
+  const extra=matches.length>12?'<p style="font-size:12px;color:#7b8798">Se muestran los 12 avisos más recientes.</p>':'';
+  backdrop.innerHTML='<div class="modal" style="width:min(760px,calc(100vw - 28px));max-height:90vh;overflow:auto" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>Cliente repetido</h2><p>Este teléfono ya aparece en '+matches.length+' '+(matches.length===1?'aviso':'avisos')+' de la empresa. Revisa el historial y decide cómo registrarlo.</p></div><button type="button" class="close" data-duplicate-cancel aria-label="Cerrar">×</button></div><div style="display:grid;gap:8px;margin:14px 0">'+rows+'</div>'+extra+'<p style="font-size:12px;color:#68758a">Si es el mismo aparato y una incidencia del aviso anterior, puedes abrir una reclamación vinculada. Para otra avería o aparato, continúa con un aviso nuevo.</p><div class="modal-actions"><button type="button" class="outline-btn" data-duplicate-cancel>Volver al aviso</button><button type="button" class="primary-btn" data-duplicate-new>Aun así, crear aviso nuevo</button></div></div>';
+  const close=()=>backdrop.remove();
+  backdrop.addEventListener('click',e=>{if(e.target===backdrop||e.target.closest('[data-duplicate-cancel]'))close();});
+  $$('[data-duplicate-view]',backdrop).forEach(button=>button.onclick=()=>{const id=button.dataset.duplicateView;close();showDetails(id);});
+  $$('[data-duplicate-claim]',backdrop).forEach(button=>button.onclick=async()=>{const id=button.dataset.duplicateClaim;close();await openPhoneNotice('reclamacion',id);});
+  $('[data-duplicate-new]',backdrop).onclick=()=>{close();duplicatePhoneBypass=normalizedPhone;$('#noticeForm').requestSubmit();};
+  document.body.append(backdrop);
+}
 async function createNotice(event) {
   event.preventDefault();
-  const submitButtons=$$('#noticeForm button[type="submit"]');
+  const type=$('#fRecordType').value||'aviso';
+  const phone=$('#fPhone')?.value?.trim()||'';
+  const normalizedPhone=normalizePhoneForMatch(phone);
+  if(type==='aviso'&&normalizedPhone.length>=9){
+    const matches=notices.filter(n=>n.notice_type==='aviso'&&normalizePhoneForMatch(n.phone)===normalizedPhone).sort((a,b)=>new Date(b.received_at)-new Date(a.received_at));
+    if(matches.length&&duplicatePhoneBypass!==normalizedPhone){showDuplicatePhoneDialog(matches,normalizedPhone,$('#fDevice')?.value?.trim()||'');return;}
+  }
+  duplicatePhoneBypass=null;
+  const submitButtons=$('#noticeForm button[type="submit"]');
   submitButtons.forEach(button=>button.disabled=true);
   const v=id=>$('#'+id).value.trim();
-  const type=$('#fRecordType').value||'aviso',isPhoneNotice=type==='aviso',device=isPhoneNotice?v('fDevice'):'';const custom_fields={};
+  const isPhoneNotice=type==='aviso',device=isPhoneNotice?v('fDevice'):'';const custom_fields={};
   $$('[data-custom-key]', $('#noticeForm')).forEach(el=>{const c=$('input,select,textarea',el);custom_fields[el.dataset.customKey]=c.type==='checkbox'?c.checked:c.value;});
   const category=categoryFor(device);
   const row={company_id:currentCompany.id,landing_id:null,notice_type:type,status:v('fStatus')||'Nuevo',customer_name:v('fName'),phone:v('fPhone'),email:$('#fEmail')?.value?.trim()||null,locality:v('fLocality')||null,postal_code:v('fPostal')||null,device:device||null,category:isPhoneNotice?category:null,brand:isPhoneNotice?(v('fBrand')||null):null,issue:v('fIssue')||null,custom_fields,unit_price:0,created_by:user.id};
@@ -942,7 +972,7 @@ async function createNotice(event) {
   if(type!=='aviso'&&data.status==='Sale')await sendNoticeToConfiguredIntegrations(data);
   else if(type!=='aviso')toast('Se ha guardado sin enviar: cliente equivocado o llamada ajena a la empresa.','Registro guardado');
   else if(data.status==='Sale')await sendNoticeToConfiguredIntegrations(data);
-  else toast(`Teléfono · ${data.device||'Aviso'} · ${formatDate(data.received_at)}`,'Aviso guardado en el CRM');
+  else toast('Teléfono · '+(data.device||'Aviso')+' · '+formatDate(data.received_at),'Aviso guardado en el CRM');
 }
 function showSettingsTab(name) {
   $$('[data-settings-tab]').forEach(button=>button.classList.toggle('active',button.dataset.settingsTab===name));
@@ -1232,6 +1262,7 @@ function wireUI() {
   $('#closeModal').addEventListener('click',()=>$('#modal').classList.remove('open'));
   $('#cancelModal').addEventListener('click',()=>$('#modal').classList.remove('open'));
   $('#modal').addEventListener('click',e=>{if(e.target.id==='modal')e.currentTarget.classList.remove('open');});
+  $('#fPhone').addEventListener('input',()=>{duplicatePhoneBypass=null;});
   $('#noticeForm').addEventListener('submit',createNotice);
   $('#menuToggle').addEventListener('click',()=>$('#sidebar').classList.toggle('open'));
   $('#pendingLandingButton').addEventListener('click',openPendingNotices);
