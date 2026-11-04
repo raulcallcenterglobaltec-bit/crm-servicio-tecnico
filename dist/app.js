@@ -869,11 +869,18 @@ function fieldsForPhone() { return fields.filter(f=>f.channel==='phone'&&!f.land
 function renderExtraFields() {
   syncDefaultFields();
   const host=$('#extraNoticeFields');if(!host)return;
+  $('[data-custom-key]').forEach(node=>node.remove());
   host.innerHTML=fieldsForPhone().filter(f=>f.visible_in_form&&!['customer_name','phone','locality','postal_code','device','brand','issue'].includes(f.field_key)).map(f=>{
     const inputType={text:'text',phone:'tel',email:'email',number:'number',date:'date',select:'select',textarea:'textarea',checkbox:'checkbox'}[f.field_type]||'text';
     let field=inputType==='select'?'<select '+(f.required?'required':'')+'>'+['',...(f.options||[])].map(v=>`<option>${esc(v)}</option>`).join('')+'</select>':inputType==='textarea'?'<textarea '+(f.required?'required':'')+'></textarea>':`<input type="${inputType}" ${f.required?'required':''} ${inputType==='checkbox'?'value="true"':''}/>`;
     return `<label class="field custom-field-value" data-custom-key="${esc(f.field_key)}"><span>${esc(f.label)}</span>${field}</label>`;
   }).join('');
+  const grid=$('#noticeFieldsGrid');if(!grid)return;
+  const domKeys={name:'customer_name',phone:'phone',locality:'locality',postal:'postal_code'};
+  const nodes=new Map();
+  $('[data-field-code]',grid).forEach(node=>nodes.set(domKeys[node.dataset.fieldCode]||node.dataset.fieldCode,node));
+  $('[data-custom-key]',host).forEach(node=>nodes.set(node.dataset.customKey,node));
+  fieldsForPhone().forEach(field=>{const node=nodes.get(field.field_key);if(node)grid.append(node);});
 }
 function syncDefaultFields() {
   const map={name:'customer_name',phone:'phone',locality:'locality',postal:'postal_code',device:'device',brand:'brand',issue:'issue'};
@@ -889,7 +896,6 @@ function updateRecordFormMode() {
   const type=$('#fRecordType')?.value||'aviso',nonNotice=type!=='aviso';
   $('#recordTypeWrap').hidden=noticeSource!=='phone'||!nonNotice;
   $('#statusFieldWrap').hidden=noticeSource!=='phone';
-  const appointmentWrap=$('#phoneAppointmentWrap');if(appointmentWrap)appointmentWrap.hidden=noticeSource!=='phone'||nonNotice;
   const status=$('#fStatus'),statusLabel=$('#fStatusLabel');
   if(status&&statusLabel&&nonNotice){
     const previous=status.value;
@@ -915,9 +921,9 @@ function updateRecordFormMode() {
   updateRecordSubmitLabel();
 }
 function updateRecordSubmitLabel() {
-  const type=$('#fRecordType')?.value||'aviso',status=$('#fStatus')?.value,submit=$('#noticeForm button[type="submit"]');
-  if(!submit)return;
-  submit.textContent=type==='aviso'?'Guardar aviso':status==='Sale'?(type==='anulacion'?'Enviar anulación':'Enviar reclamación'):'Registrar cliente equivocado';
+  const type=$('#fRecordType')?.value||'aviso',status=$('#fStatus')?.value,submit=$('#saveNotice'),agendaSubmit=$('#saveAndSchedule');
+  if(submit)submit.textContent=type==='aviso'?'Guardar aviso':status==='Sale'?(type==='anulacion'?'Enviar anulación':'Enviar reclamación'):'Registrar cliente equivocado';
+  if(agendaSubmit){agendaSubmit.hidden=noticeSource!=='phone'||type!=='aviso';agendaSubmit.disabled=status!=='Sale';agendaSubmit.title=status==='Sale'?'Guardar el aviso y abrir la agenda':'Para agendar, marca primero el aviso como sacado';}
 }
 function normalizePhoneForMatch(value) {
   let digits=String(value||'').replace(/\D/g,'');
@@ -945,7 +951,7 @@ async function openPhoneNotice(type='aviso', preselectedId=null) {
     else toast('No encontramos un aviso sacado con ese número en esta empresa. Podrás completar los datos y marcar el resultado.','Sin aviso relacionado');
   }
   relatedNoticeMatch=matched;
-  noticeSource='phone';$('#noticeForm').reset();$('#phoneAppointmentFields').hidden=true;$('#scheduleAppointment').checked=false;
+  noticeSource='phone';$('#noticeForm').reset();
   $('#fRecordType').innerHTML=type==='aviso'?'<option value="aviso">Aviso técnico</option>':'<option value="reclamacion">Reclamación</option><option value="anulacion">Anulación</option>';
   $('#fRecordType').value=type;
   syncDefaultFields();renderExtraFields();updateRecordFormMode();
@@ -960,7 +966,7 @@ async function openPhoneNotice(type='aviso', preselectedId=null) {
   } else {const hint=$('#relatedNoticeHint');if(hint)hint.hidden=true;}
   $('#modal').classList.add('open');$('#fName').focus();
 }
-function showDuplicatePhoneDialog(matches,normalizedPhone) {
+function showDuplicatePhoneDialog(matches,normalizedPhone,submitAction='saveNotice') {
   const backdrop=document.createElement('div');backdrop.className='modal-backdrop open';
   const highest=[...document.querySelectorAll('.modal-backdrop')].reduce((max,el)=>Math.max(max,Number(el.style.zIndex)||0),100);
   backdrop.style.zIndex=String(highest+20);
@@ -976,17 +982,19 @@ function showDuplicatePhoneDialog(matches,normalizedPhone) {
   backdrop.addEventListener('click',e=>{if(e.target===backdrop||e.target.closest('[data-duplicate-cancel]'))close();});
   $$('[data-duplicate-view]',backdrop).forEach(button=>button.onclick=()=>showDetails(button.dataset.duplicateView));
   $$('[data-duplicate-claim]',backdrop).forEach(button=>button.onclick=async()=>{const id=button.dataset.duplicateClaim;close();await openPhoneNotice('reclamacion',id);});
-  $('[data-duplicate-new]',backdrop).onclick=()=>{close();duplicatePhoneBypass=normalizedPhone;$('#noticeForm').requestSubmit();};
+  $('[data-duplicate-new]',backdrop).onclick=()=>{close();duplicatePhoneBypass=normalizedPhone;$('#noticeForm').requestSubmit($('#'+submitAction));};
   document.body.append(backdrop);
 }
 async function createNotice(event) {
   event.preventDefault();
   const type=$('#fRecordType').value||'aviso';
+  const saveAndSchedule=event.submitter?.id==='saveAndSchedule';
+  if(saveAndSchedule&&(noticeSource!=='phone'||type!=='aviso'||$('#fStatus').value!=='Sale')){toast('Para guardar y agendar, marca primero el aviso como sacado.','Aviso todavía no sacado');return;}
   const phone=$('#fPhone')?.value?.trim()||'';
   const normalizedPhone=normalizePhoneForMatch(phone);
   if(type==='aviso'&&normalizedPhone.length>=9){
     const matches=notices.filter(n=>n.notice_type==='aviso'&&normalizePhoneForMatch(n.phone)===normalizedPhone).sort((a,b)=>new Date(b.received_at)-new Date(a.received_at));
-    if(matches.length&&duplicatePhoneBypass!==normalizedPhone){showDuplicatePhoneDialog(matches,normalizedPhone);return;}
+    if(matches.length&&duplicatePhoneBypass!==normalizedPhone){showDuplicatePhoneDialog(matches,normalizedPhone,saveAndSchedule?'saveAndSchedule':'saveNotice');return;}
   }
   duplicatePhoneBypass=null;
   const submitButtons=$$('#noticeForm button[type="submit"]');
@@ -996,34 +1004,17 @@ async function createNotice(event) {
   $$('[data-custom-key]', $('#noticeForm')).forEach(el=>{const c=$('input,select,textarea',el);custom_fields[el.dataset.customKey]=c.type==='checkbox'?c.checked:c.value;});
   const category=categoryFor(device);
   const row={company_id:currentCompany.id,landing_id:null,notice_type:type,status:v('fStatus')||'Nuevo',customer_name:v('fName'),phone:v('fPhone'),email:$('#fEmail')?.value?.trim()||null,locality:v('fLocality')||null,postal_code:v('fPostal')||null,device:device||null,category:isPhoneNotice?category:null,brand:isPhoneNotice?(v('fBrand')||null):null,issue:v('fIssue')||null,custom_fields,unit_price:0,created_by:user.id};
-  const scheduleAppointment=type==='aviso'&&$('#scheduleAppointment')?.checked;
-  let appointmentDraft=null,savedAppointment=null,appointmentError=null;
-  if(scheduleAppointment){
-    const dateValue=$('#phoneAppointmentStart')?.value;
-    const start=dateValue?new Date(dateValue):null;
-    if(!start||!Number.isFinite(start.getTime())){submitButtons.forEach(button=>button.disabled=false);toast('Indica una fecha y hora válida para la cita.','Falta la fecha');return;}
-    appointmentDraft={company_id:currentCompany.id,start_at:start.toISOString(),duration_minutes:Number($('#phoneAppointmentDuration')?.value||60),customer_name:v('fName'),phone:v('fPhone'),address:$('#phoneAppointmentAddress')?.value?.trim()||v('fLocality')||null,notes:$('#phoneAppointmentNotes')?.value?.trim()||v('fIssue')||null,status:'scheduled',created_by:user.id};
-  }
   if(!isPhoneNotice&&relatedNoticeMatch)row.related_notice_id=relatedNoticeMatch.id;
   if(row.status==='Sale'&&isPhoneNotice)row.unit_price=Number(tariffForNotice(row)?.price||0);
   const {data,error}=await db.from('notices').insert(row).select().single();
   if(error){submitButtons.forEach(button=>button.disabled=false);toast(errorText(error),'No se pudo guardar el aviso');return;}
-  if(appointmentDraft){
-    const result=await db.from('appointments').insert({...appointmentDraft,notice_id:data.id}).select().single();
-    if(result.error)appointmentError=result.error;else savedAppointment=result.data;
-  }
   submitButtons.forEach(button=>button.disabled=false);
   notices.unshift(data);relatedNoticeMatch=null;$('#modal').classList.remove('open');event.target.reset();renderRows();renderComplaints();renderClientHistory();
-  if(savedAppointment){appointments.push(savedAppointment);agendaSelectedDate=localDateKey(savedAppointment.start_at);agendaMonth=new Date(new Date(savedAppointment.start_at).getFullYear(),new Date(savedAppointment.start_at).getMonth(),1);renderAgenda();}
   if(type!=='aviso'&&data.status==='Sale')await sendNoticeToConfiguredIntegrations(data);
   else if(type!=='aviso')toast('Se ha guardado sin enviar: cliente equivocado o llamada ajena a la empresa.','Registro guardado');
   else if(data.status==='Sale')await sendNoticeToConfiguredIntegrations(data);
-  let appointmentSyncError=null;
-  if(savedAppointment&&calendarConnection){const sync=await syncAppointmentWithGoogle(savedAppointment);appointmentSyncError=sync?.error||null;}
-  if(appointmentError)toast('El aviso se guardó, pero no se pudo guardar la cita. Puedes crearla desde Agenda. '+errorText(appointmentError),'Aviso guardado');
-  else if(savedAppointment&&appointmentSyncError)toast('Aviso y cita guardados en el CRM; Google Calendar queda pendiente: '+appointmentSyncError,'Sincronización pendiente');
-  else if(savedAppointment)toast(calendarConnection?'Aviso y cita guardados y sincronizados.':'Aviso y cita guardados. Conecta Google Calendar desde Integraciones para sincronizar.','Aviso y cita guardados');
-  else if(type==='aviso'&&data.status!=='Sale')toast('Teléfono · '+(data.device||'Aviso')+' · '+formatDate(data.received_at),'Aviso guardado en el CRM');
+  if(type==='aviso'&&data.status!=='Sale')toast('Teléfono · '+(data.device||'Aviso')+' · '+formatDate(data.received_at),'Aviso guardado en el CRM');
+  if(saveAndSchedule){showPage('agenda');await openAppointmentDialog(null,{notice_id:data.id});}
 }
 function showSettingsTab(name) {
   $$('[data-settings-tab]').forEach(button=>button.classList.toggle('active',button.dataset.settingsTab===name));
@@ -1291,6 +1282,26 @@ function appointmentTime(value) {
 function appointmentDateLabel(value,options={weekday:'long',day:'numeric',month:'long'}) {
   return new Intl.DateTimeFormat('es-ES',options).format(new Date(value));
 }
+function agendaEligibleNotices() {
+  return notices.filter(n=>n.notice_type==='aviso'&&n.status==='Sale')
+    .sort((a,b)=>new Date(b.received_at)-new Date(a.received_at));
+}
+function agendaNoticeLabel(notice) {
+  const parts=[notice.customer_name||'Cliente sin nombre',notice.phone||'Sin teléfono',notice.device||notice.category||'Aviso técnico',notice.landing_id?landingName(notice.landing_id):'Teléfono',formatDate(notice.received_at)];
+  return parts.filter(Boolean).join(' · ');
+}
+function appointmentAddressFromNotice(notice) {
+  if(!notice)return '';
+  const source=notice.landing_id?fieldsForLanding(notice.landing_id):fieldsForPhone();
+  const addressField=source.find(field=>/direcci[oó]n/i.test(String(field.label||''))||/address|direccion/i.test(String(field.field_key||'')));
+  const custom=notice.custom_fields||{};
+  const value=addressField?custom[addressField.field_key]:null;
+  return String(value||'').trim()||[notice.locality,notice.postal_code].filter(Boolean).join(', ');
+}
+function agendaVisibleAppointments() {
+  const eligibleIds=new Set(agendaEligibleNotices().map(n=>n.id));
+  return appointments.filter(a=>a.notice_id&&eligibleIds.has(a.notice_id));
+}
 function renderAgenda() {
   const grid=$('#agendaCalendarGrid');if(!grid)return;
   if(!agendaSelectedDate)agendaSelectedDate=localDateKey(new Date());
@@ -1301,7 +1312,7 @@ function renderAgenda() {
   const today=localDateKey(new Date());
   grid.innerHTML=Array.from({length:42},(_,index)=>{
     const date=new Date(gridStart);date.setDate(gridStart.getDate()+index);
-    const key=localDateKey(date),items=appointments.filter(a=>localDateKey(a.start_at)===key).sort((a,b)=>new Date(a.start_at)-new Date(b.start_at));
+    const key=localDateKey(date),items=agendaVisibleAppointments().filter(a=>localDateKey(a.start_at)===key).sort((a,b)=>new Date(a.start_at)-new Date(b.start_at));
     const chips=items.slice(0,2).map(a=>'<span class="agenda-day-chip '+(a.status==='cancelled'?'cancelled':a.status==='completed'?'completed':'')+'">'+appointmentTime(a.start_at)+' '+esc(a.customer_name)+'</span>').join('');
     const more=items.length>2?'<small class="agenda-more">+'+(items.length-2)+' más</small>':'';
     const classes=['agenda-day-cell',date.getMonth()!==month?'other-month':'',key===today?'today':'',key===agendaSelectedDate?'selected':''].filter(Boolean).join(' ');
@@ -1309,13 +1320,13 @@ function renderAgenda() {
   }).join('');
   const selected=$('#agendaDayLabel');if(selected)selected.textContent=appointmentDateLabel(new Date(agendaSelectedDate+'T12:00:00'),{weekday:'long',day:'numeric',month:'long'});
   const dayList=$('#agendaDayEvents'),dayCount=$('#agendaDayCount');
-  const daily=appointments.filter(a=>localDateKey(a.start_at)===agendaSelectedDate).sort((a,b)=>new Date(a.start_at)-new Date(b.start_at));
+  const daily=agendaVisibleAppointments().filter(a=>localDateKey(a.start_at)===agendaSelectedDate).sort((a,b)=>new Date(a.start_at)-new Date(b.start_at));
   if(dayCount)dayCount.textContent=daily.length+' '+(daily.length===1?'cita':'citas');
   if(dayList)dayList.innerHTML=daily.map(a=>{
     const status=a.status==='cancelled'?'Anulada':a.status==='completed'?'Realizada':'Programada';
     const sync=a.google_event_id?'Sincronizada con Google Calendar':a.google_sync_error?'Pendiente de sincronizar con Google Calendar':'';
     const duration=Number(a.duration_minutes)||60;
-    return '<article class="agenda-event '+(a.status==='cancelled'?'cancelled':a.status==='completed'?'completed':'')+'"><div class="agenda-event-time">'+appointmentTime(a.start_at)+'<small>'+duration+' min</small></div><div class="agenda-event-info"><strong>'+esc(a.customer_name)+'</strong><span>'+esc(a.phone)+'</span><span>'+esc(a.address||'Sin dirección indicada')+'</span><span>'+esc(a.notes||'')+'</span><small>'+status+(sync?' · '+sync:'')+'</small></div><div class="agenda-event-actions"><button type="button" class="outline-btn" data-edit-appointment="'+esc(a.id)+'">Editar</button>'+(a.status==='scheduled'?'<button type="button" class="outline-btn" data-complete-appointment="'+esc(a.id)+'">Realizada</button><button type="button" class="outline-btn" data-cancel-appointment="'+esc(a.id)+'">Anular</button>':'')+(a.status==='cancelled'?'<button type="button" class="outline-btn" data-reopen-appointment="'+esc(a.id)+'">Reprogramar</button>':'')+'<button type="button" class="mini-delete" data-delete-appointment="'+esc(a.id)+'" aria-label="Eliminar cita">×</button></div></article>';
+    return '<article class="agenda-event '+(a.status==='cancelled'?'cancelled':a.status==='completed'?'completed':'')+'"><div class="agenda-event-time">'+appointmentTime(a.start_at)+'<small>'+duration+' min</small></div><div class="agenda-event-info"><strong>'+esc(a.customer_name)+'</strong><span>'+esc(a.phone)+'</span><span>'+esc(a.address||appointmentAddressFromNotice(notices.find(n=>n.id===a.notice_id))||'Sin dirección indicada')+'</span><span>'+esc(a.notes||'')+'</span><small>'+status+(sync?' · '+sync:'')+'</small></div><div class="agenda-event-actions"><button type="button" class="outline-btn" data-edit-appointment="'+esc(a.id)+'">Editar</button>'+(a.status==='scheduled'?'<button type="button" class="outline-btn" data-complete-appointment="'+esc(a.id)+'">Realizada</button><button type="button" class="outline-btn" data-cancel-appointment="'+esc(a.id)+'">Anular</button>':'')+(a.status==='cancelled'?'<button type="button" class="outline-btn" data-reopen-appointment="'+esc(a.id)+'">Reprogramar</button>':'')+'<button type="button" class="mini-delete" data-delete-appointment="'+esc(a.id)+'" aria-label="Eliminar cita">×</button></div></article>';
   }).join('')||'<div class="empty">No hay citas para este día.</div>';
   $$('[data-agenda-date]',grid).forEach(button=>button.onclick=()=>{agendaSelectedDate=button.dataset.agendaDate;renderAgenda();});
   $$('[data-edit-appointment]',dayList).forEach(button=>button.onclick=()=>openAppointmentDialog(appointments.find(a=>a.id===button.dataset.editAppointment)));
@@ -1325,31 +1336,35 @@ function renderAgenda() {
   $$('[data-delete-appointment]',dayList).forEach(button=>button.onclick=()=>deleteAppointment(button.dataset.deleteAppointment));
 }
 async function openAppointmentDialog(existing=null,overrides={}) {
+  const eligible=agendaEligibleNotices();
+  const requestedId=existing?.notice_id||overrides.notice_id||'';
+  if(!eligible.length){toast('Para agendar, primero debe existir un aviso marcado como sacado.','No hay avisos sacados');return;}
+  if(existing&&!eligible.some(n=>n.id===existing.notice_id)){toast('Solo se pueden agendar clientes con un aviso marcado como sacado.','Aviso no disponible');return;}
   const source=existing||{};
   const answer=await formDialog({
     title:existing?'Editar cita':'Agendar cita',
-    description:'Esta cita pertenece únicamente a '+(currentCompany?.name||'la empresa seleccionada')+'.',
+    description:'Elige un aviso sacado. El cliente y su teléfono se completan desde ese aviso.',
     fields:[
-      {key:'customer_name',label:'Cliente',value:source.customer_name||'',required:true},
-      {key:'phone',label:'Teléfono',type:'tel',value:source.phone||'',required:true},
+      {key:'notice_id',label:'Aviso sacado · cliente',type:'select',value:requestedId,required:true,options:eligible.map(n=>({value:n.id,label:agendaNoticeLabel(n)}))},
       {key:'start_at',label:'Fecha y hora',type:'datetime-local',value:localDateTimeValue(source.start_at||defaultAppointmentStart()),required:true},
       {key:'duration_minutes',label:'Duración en minutos',type:'number',value:source.duration_minutes||60,required:true},
-      {key:'address',label:'Dirección de la cita',value:source.address||''},
       {key:'notes',label:'Notas para el técnico',type:'textarea',value:source.notes||''},
       {key:'status',label:'Estado',type:'select',value:overrides.status||((source.status==='cancelled')?'scheduled':source.status||'scheduled'),options:[{value:'scheduled',label:'Programada'},{value:'completed',label:'Realizada'}]}
     ]
   });
   if(!answer)return;
+  const selectedNotice=eligible.find(n=>n.id===answer.notice_id);
+  if(!selectedNotice){toast('Selecciona un aviso marcado como sacado.','Aviso no disponible');return;}
   const start=new Date(answer.start_at);
   if(!Number.isFinite(start.getTime())){toast('Indica una fecha y hora válidas.','Fecha no válida');return;}
   const payload={
     company_id:currentCompany.id,
-    notice_id:source.notice_id||overrides.notice_id||null,
-    customer_name:answer.customer_name.trim(),
-    phone:answer.phone.trim(),
+    notice_id:selectedNotice.id,
+    customer_name:selectedNotice.customer_name||'Cliente',
+    phone:selectedNotice.phone||'',
     start_at:start.toISOString(),
     duration_minutes:Math.max(15,Math.min(480,Number(answer.duration_minutes)||60)),
-    address:answer.address.trim()||null,
+    address:appointmentAddressFromNotice(selectedNotice)||null,
     notes:answer.notes.trim()||null,
     status:answer.status||'scheduled',
     updated_at:new Date().toISOString()
@@ -1548,7 +1563,6 @@ function wireUI() {
   $('#agendaNext').addEventListener('click',()=>{agendaMonth=new Date(agendaMonth.getFullYear(),agendaMonth.getMonth()+1,1);renderAgenda();});
   $('#agendaToday').addEventListener('click',()=>{agendaSelectedDate=localDateKey(new Date());agendaMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1);renderAgenda();});
   $('#newAppointment').addEventListener('click',()=>openAppointmentDialog());
-  $('#scheduleAppointment').addEventListener('change',event=>{const fields=$('#phoneAppointmentFields');if(fields)fields.hidden=!event.target.checked;const date=$('#phoneAppointmentStart');if(event.target.checked&&date&&!date.value)date.value=localDateTimeValue(defaultAppointmentStart());});
 
   $('#fRecordType').addEventListener('change',()=>{syncDefaultFields();renderExtraFields();updateRecordFormMode();});
   $('#fStatus').addEventListener('change',updateRecordSubmitLabel);
