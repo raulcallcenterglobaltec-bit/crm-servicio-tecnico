@@ -3,7 +3,7 @@ import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.1
 export const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 }
 
 export function json(body: unknown, status = 200, extra: Record<string,string> = {}) {
@@ -83,7 +83,10 @@ export async function sendNoticeNotifications(admin: SupabaseClient, companyId: 
   for (const item of (data || []).filter(x => !onlyKind || x.kind === onlyKind)) {
     try {
       const config = await decryptConfig(item.encrypted_config)
-      if (!test && config.routes && (!Array.isArray(config.routes[eventType]) || !config.routes[eventType].includes(item.kind))) continue
+      const landingRoutes = config.landing_routes || {}
+      const hasLandingRoute = eventType === 'form' && notice?.landing_id && Object.prototype.hasOwnProperty.call(landingRoutes, notice.landing_id)
+      if (!test && hasLandingRoute && (!Array.isArray(landingRoutes[notice.landing_id]) || !landingRoutes[notice.landing_id].includes(item.kind))) continue
+      if (!test && !hasLandingRoute && config.routes && (!Array.isArray(config.routes[eventType]) || !config.routes[eventType].includes(item.kind))) continue
       const time = new Date().toLocaleString('es-ES',{timeZone:'Europe/Madrid',dateStyle:'short',timeStyle:'short'})
       const isCancellation = notice.notice_type === 'anulacion'
       const isComplaint = eventType === 'complaint'
