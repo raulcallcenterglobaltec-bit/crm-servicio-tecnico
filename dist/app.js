@@ -455,6 +455,7 @@ function renderRows() {
       if(f.field_key==='customer_name')return `<td><div class="client-cell"><span class="client-initial">${esc((v||'??').slice(0,2).toUpperCase())}</span><div><strong>${esc(v||'Sin nombre')}</strong><small>${esc(n.phone||'')}</small></div></div></td>`;
       if(f.field_key==='device')return `<td><span class="device">${esc(v||'—')}</span></td>`;
       if(f.field_key==='phone')return `<td>${esc(v||'—')}</td>`;
+      if(f.field_key==='issue')return `<td><div class="table-issue" title="${esc(v||'—')}">${esc(v||'—')}</div></td>`;
       return `<td>${esc(v||'—')}</td>`;
     }).join('');
     const sourceLabel=n.created_by?'Teléfono':landingName(n.landing_id);
