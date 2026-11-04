@@ -664,11 +664,11 @@ function openPendingNotices() {
     const action=e.target.closest('[data-pending-status]');
     if(action){
       const status=action.getAttribute('data-pending-status');let reason=null;
-      if(status==='No sale'){reason=await requestNoSaleReason(notices.find(item=>item.id===id)?.management_reason||'');if(reason===null)return;}
+      if(status==='No sale'){close();reason=await requestNoSaleReason(notices.find(item=>item.id===id)?.management_reason||'');if(reason===null)return;}
       host.querySelectorAll('button').forEach(button=>button.disabled=true);action.textContent='Guardando…';
       const saved=await changeStatus(id,status,reason);
-      if(saved){toast(status==='Sale'?'Aviso marcado como sacado.':'Aviso marcado como no sacado.','Gestión actualizada');renderPendingNoticeList(backdrop);}
-      else renderPendingNoticeDetail(backdrop,id);
+      if(saved){toast(status==='Sale'?'Aviso marcado como sacado.':'Aviso marcado como no sacado.','Gestión actualizada');if(backdrop.isConnected)renderPendingNoticeList(backdrop);}
+      else if(backdrop.isConnected)renderPendingNoticeDetail(backdrop,id);
     }
   });
   renderPendingNoticeList(backdrop);
