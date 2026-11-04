@@ -1,6 +1,8 @@
 const CFG = window.CRM_SUPABASE_CONFIG || {};
 const hasBackend = !!(CFG.url && CFG.publishableKey && window.supabase?.createClient);
-const db = hasBackend ? window.supabase.createClient(CFG.url, CFG.publishableKey, {auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}}) : null;
+const projectRef = (()=>{try{return new URL(CFG.url).hostname.split('.')[0];}catch(_){return '';}})();
+if(projectRef)try{localStorage.removeItem(`sb-${projectRef}-auth-token`);}catch(_){}
+const db = hasBackend ? window.supabase.createClient(CFG.url, CFG.publishableKey, {auth:{persistSession:false,autoRefreshToken:true,detectSessionInUrl:false}}) : null;
 const $ = (s, root=document) => root.querySelector(s);
 const $$ = (s, root=document) => [...root.querySelectorAll(s)];
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -668,32 +670,31 @@ function installPendingUi() {
     style.textContent='.notice-row-actions{display:flex;align-items:center;gap:5px;white-space:nowrap}.notice-row-actions .row-action{min-width:29px}.notice-row-actions .notice-delete{color:#df2c0b;border-color:#f2c7bd;background:#fff7f5}.notice-row-actions .notice-delete:hover{background:#ffebe6;border-color:#e44820}.pending-status-actions .pending-delete{color:#c6281f;border-color:#f1c0ba;background:#fff7f5}.metric-clickable{cursor:pointer;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}.metric-pending{background:#fff0e9!important;border-color:#ef9b81!important;box-shadow:inset 4px 0 0 #e44820,0 5px 16px rgba(228,72,32,.09)!important}.metric-clickable:hover{transform:translateY(-2px);border-color:#f3c369;box-shadow:0 10px 26px rgba(28,42,69,.12)}.metric-clickable:focus-visible{outline:3px solid rgba(229,44,13,.35);outline-offset:3px}.pending-modal{width:min(760px,calc(100vw - 28px));max-height:calc(100vh - 36px);overflow:auto}.pending-modal .modal-head{align-items:flex-start}.pending-modal .modal-head p{margin:5px 0 0;color:#7d8798;font-size:12px}.pending-list{display:grid;gap:9px;margin:14px 0}.pending-item{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;padding:13px 15px;background:#fff;border:1px solid #e5e9f1;border-radius:11px;color:#17243a;cursor:pointer;transition:border-color .15s,background .15s,transform .15s}.pending-item:hover,.pending-item:focus-visible{border-color:#e44820;background:#fffaf8;transform:translateY(-1px);outline:none}.pending-item-main{display:grid;gap:4px;min-width:0}.pending-item-main strong{font-size:13px}.pending-item-main span{font-size:12px;color:#4e5d73}.pending-item-main small{font-size:10px;color:#8490a2}.pending-item-action{display:flex;align-items:center;gap:8px;color:#df2c0b;font-size:12px;font-weight:700;white-space:nowrap}.pending-item-action b{font-size:20px}.pending-hint{margin:12px 0 0;color:#7d8798;font-size:11px}.pending-empty{padding:32px 12px;display:grid;gap:7px;text-align:center;color:#7d8798;font-size:12px}.pending-empty strong{color:#18243a;font-size:16px}.pending-back{border:0;background:none;color:#df2c0b;font-family:inherit;font-size:12px;font-weight:600;padding:0;margin:0 0 14px;cursor:pointer}.pending-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.pending-detail-item{min-width:0;border:1px solid #e7eaf0;border-radius:9px;padding:10px 11px;display:grid;gap:5px;background:#fbfcfe}.pending-detail-item span{font-size:10px;color:#8490a2;text-transform:uppercase;letter-spacing:.04em}.pending-detail-item strong{font-size:13px;color:#202d43;white-space:pre-wrap;overflow-wrap:anywhere}.pending-detail-item.wide{grid-column:1/-1}.pending-status-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:18px;flex-wrap:wrap}.pending-status-actions button:disabled{opacity:.55;cursor:not-allowed}@media(max-width:560px){.pending-detail-grid{grid-template-columns:1fr}.pending-item{align-items:flex-start;flex-direction:column}.pending-item-action{align-self:flex-end}.pending-status-actions button{flex:1}}';
     document.head.append(style);
   }
-  const metric=$('#mNew')?.closest('.metric');
-  if(metric) {
-    metric.id='pendingMetric';metric.classList.add('metric-clickable');
-    metric.setAttribute('role','button');metric.setAttribute('tabindex','0');
-    metric.setAttribute('aria-label','Revisar avisos pendientes');
-    const foot=$('.metric-foot',metric);if(foot)foot.textContent='Pendientes de gestión · Pulsa para revisar';
+  const metricActions=[['mTotal','all','Consultar avisos recibidos'],['mNew','Nuevo','Consultar avisos nuevos'],['mSold','Sale','Consultar avisos sacados'],['mLost','No sale','Consultar avisos no sacados']];
+  for(const [valueId,status,label] of metricActions){
+    const metric=$('#'+valueId)?.closest('.metric');if(!metric)continue;
+    metric.classList.add('metric-clickable');metric.dataset.noticeList=status;metric.setAttribute('role','button');metric.setAttribute('tabindex','0');metric.setAttribute('aria-label',label);
+    if(valueId==='mNew'){metric.id='pendingMetric';const foot=$('.metric-foot',metric);if(foot)foot.textContent='Pendientes de gestión · Pulsa para revisar';}
   }
   const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
   let textNode;
   while((textNode=walker.nextNode()))if(textNode.nodeValue.includes('Aviso Nulo'))textNode.nodeValue=textNode.nodeValue.replaceAll('Aviso Nulo','Aviso no sacado');
 }
-function pendingNoticeRows() {
-  const landingFilter=noticeSource==='landing'?($('#landingFilter')?.value||'all'):'all';
-  return notices.filter(n=>n.notice_type==='aviso'&&n.status==='Nuevo'
-    &&(noticeSource==='phone'?!!n.created_by:!!n.landing_id)
-    &&(landingFilter==='all'||n.landing_id===landingFilter))
+function pendingNoticeRows(status='Nuevo') {
+  return filteredNotices(false).filter(n=>status==='all'||n.status===status)
     .sort((a,b)=>new Date(b.received_at)-new Date(a.received_at));
 }
 function pendingDetailRow(label,value,wide) {
   return '<div class="pending-detail-item'+(wide?' wide':'')+'"><span>'+esc(label)+'</span><strong>'+esc(value||'—')+'</strong></div>';
 }
-function openPendingNotices() {
-  const existing=$('.pending-modal-backdrop');if(existing){existing.remove();return;}
+function openPendingNotices(status='Nuevo') {
+  $('.pending-modal-backdrop')?.remove();
+  const titles={all:'Avisos recibidos',Nuevo:'Avisos nuevos',Sale:'Avisos sacados','No sale':'Avisos no sacados'};
+  const title=titles[status]||titles.Nuevo;
   const backdrop=document.createElement('div');backdrop.className='modal-backdrop open pending-modal-backdrop';
+  backdrop.dataset.pendingStatus=status;
   backdrop.style.zIndex='130';
-  backdrop.innerHTML='<div class="modal pending-modal" role="dialog" aria-modal="true" aria-labelledby="pendingModalTitle"><div class="modal-head"><div><h2 id="pendingModalTitle">Pendientes de gestión</h2><p>Selecciona un aviso para ver sus datos y marcar el resultado.</p></div><button class="close" type="button" data-pending-close aria-label="Cerrar">×</button></div><div class="pending-content"></div></div>';
+  backdrop.innerHTML=`<div class="modal pending-modal" role="dialog" aria-modal="true" aria-labelledby="pendingModalTitle"><div class="modal-head"><div><h2 id="pendingModalTitle">${esc(title)}</h2><p>Selecciona un aviso para ver sus datos y gestionar su estado.</p></div><button class="close" type="button" data-pending-close aria-label="Cerrar">×</button></div><div class="pending-content"></div></div>`;
   const close=()=>{backdrop.remove();document.removeEventListener('keydown',onKey);};
   const onKey=e=>{if(e.key==='Escape')close();};
   backdrop.addEventListener('click',e=>{if(e.target===backdrop||e.target.closest('[data-pending-close]'))close();});
@@ -707,6 +708,16 @@ function openPendingNotices() {
     const id=backdrop.dataset.pendingNoticeId;
     if(e.target.closest('[data-pending-edit]')){await editNotice(id);renderPendingNoticeDetail(backdrop,id);return;}
     if(e.target.closest('[data-pending-delete]')){if(await deleteNotice(id))renderPendingNoticeList(backdrop);return;}
+    if(e.target.closest('[data-pending-schedule]')){
+      const notice=notices.find(item=>item.id===id);
+      if(!notice||!canManageCurrentNotices()||!notice.landing_id)return;
+      host.querySelectorAll('button').forEach(button=>button.disabled=true);
+      const scheduleButton=e.target.closest('[data-pending-schedule]');if(scheduleButton)scheduleButton.textContent='Guardando…';
+      const saved=await changeStatus(id,'Sale');
+      if(saved){close();await openAppointmentDialog(null,{notice_id:id});}
+      else if(backdrop.isConnected)renderPendingNoticeDetail(backdrop,id);
+      return;
+    }
     const action=e.target.closest('[data-pending-status]');
     if(action){
       const status=action.getAttribute('data-pending-status');let reason=null;
@@ -721,15 +732,17 @@ function openPendingNotices() {
 }
 function renderPendingNoticeList(backdrop) {
   const host=$('.pending-content',backdrop);if(!host)return;
-  const rows=pendingNoticeRows();
+  const status=backdrop.dataset.pendingStatus||'Nuevo';
+  const titles={all:'avisos recibidos',Nuevo:'avisos nuevos',Sale:'avisos sacados','No sale':'avisos no sacados'};
+  const rows=pendingNoticeRows(status);
   if(!rows.length) {
-    host.innerHTML='<div class="pending-empty"><strong>Todo al día</strong><span>No hay avisos nuevos pendientes en esta vista.</span></div>';
+    host.innerHTML='<div class="pending-empty"><strong>No hay avisos</strong><span>No hay '+(titles[status]||titles.Nuevo)+' en los filtros seleccionados.</span></div>';
     return;
   }
   host.innerHTML='<div class="pending-list">'+rows.map(n=>{
     const origin=n.created_by?'Teléfono':landingName(n.landing_id);
     const summary=[n.device,n.locality].filter(Boolean).join(' · ')||'Sin aparato ni localidad';
-    return '<button type="button" class="pending-item" data-pending-open="'+esc(n.id)+'"><span class="pending-item-main"><strong>'+esc(n.customer_name||'Sin nombre')+'</strong><span>'+esc(summary)+'</span><small>'+esc(origin)+' · '+esc(formatDate(n.received_at))+'</small></span><span class="pending-item-action">Ver datos <b aria-hidden="true">›</b></span></button>';
+    return '<button type="button" class="pending-item" data-pending-open="'+esc(n.id)+'"><span class="pending-item-main"><strong>'+esc(n.customer_name||'Sin nombre')+'</strong><span>'+esc(summary)+'</span><small>'+esc(origin)+' · '+esc(formatDate(n.received_at))+' · '+esc(statusLabel(n.status))+'</small></span><span class="pending-item-action">Ver datos <b aria-hidden="true">›</b></span></button>';
   }).join('')+'</div><p class="pending-hint">Al elegir un resultado, el aviso saldrá de esta lista de pendientes.</p>';
 }
 function renderPendingNoticeDetail(backdrop,id) {
@@ -746,7 +759,7 @@ function renderPendingNoticeDetail(backdrop,id) {
     +pendingDetailRow('Código postal',n.postal_code,false)+pendingDetailRow('Marca',n.brand,false)
     +pendingDetailRow('Recibido',formatDate(n.received_at),false)+pendingDetailRow('Avería',n.issue,true)
     +(n.status==='No sale'?pendingDetailRow('Motivo por el que no salió',n.management_reason||'Motivo no indicado',true):'')+extras
-    +'</div><div class="pending-status-actions">'+(canManageCurrentNotices()?'<button type="button" class="outline-btn" data-pending-edit>Editar datos</button>':'')+(isSuperAdmin?'<button type="button" class="outline-btn pending-delete" data-pending-delete>Eliminar aviso</button>':'')+'<button type="button" class="outline-btn" data-pending-status="No sale" '+(canManage?'':'disabled')+'>Aviso no sacado</button><button type="button" class="primary-btn" data-pending-status="Sale" '+(canManage?'':'disabled')+'>Aviso sacado</button></div>'
+    +'</div><div class="pending-status-actions">'+(canManageCurrentNotices()?'<button type="button" class="outline-btn" data-pending-edit>Editar datos</button>':'')+(isSuperAdmin?'<button type="button" class="outline-btn pending-delete" data-pending-delete>Eliminar aviso</button>':'')+'<button type="button" class="outline-btn" data-pending-status="No sale" '+(canManage?'':'disabled')+'>Aviso no sacado</button>'+(n.landing_id&&n.notice_type==='aviso'?'<button type="button" class="outline-btn" data-pending-status="Sale" '+(canManage?'':'disabled')+'>Aviso sacado sin agendar</button><button type="button" class="primary-btn" data-pending-schedule '+(canManage?'':'disabled')+'>Aviso sacado y agendar</button>':'<button type="button" class="primary-btn" data-pending-status="Sale" '+(canManage?'':'disabled')+'>Aviso sacado</button>')+'</div>'
     +(canManage?'':'<p class="pending-hint">Tu perfil puede consultar los datos, pero no cambiar el estado.</p>');
 }
 function setupDate(prefix) {
@@ -1367,7 +1380,7 @@ function renderAgenda() {
       const cards=items.map(item=>{
         const address=item.address||appointmentAddressFromNotice(notices.find(n=>n.id===item.notice_id));
         const stateClass=item.status==='cancelled'?'cancelled':item.status==='completed'?'completed':'';
-        return '<article class="agenda-hour-event '+stateClass+'"><strong>'+appointmentTime(item.start_at)+' · '+esc(item.notice_id?item.customer_name:'Cita')+'</strong><span>'+esc(item.phone)+(address?' · '+esc(address):'')+'</span></article>';
+        return '<article class="agenda-hour-event '+stateClass+'"><strong>'+appointmentTime(item.start_at)+' · '+esc(item.notice_id?item.customer_name:(item.reason||'Cita'))+'</strong><span>'+esc(item.phone)+(address?' · '+esc(address):'')+'</span></article>';
       }).join('');
       return '<div class="agenda-hour-row"><div class="agenda-hour-label">'+label+'</div><div class="agenda-hour-events">'+(cards||'<div class="agenda-hour-empty"></div>')+'</div></div>';
     }).join('');
@@ -1376,7 +1389,7 @@ function renderAgenda() {
     grid.innerHTML=dates.map(date=>{
       const key=localDateKey(date),items=visible.filter(a=>localDateKey(a.start_at)===key).sort((a,b)=>new Date(a.start_at)-new Date(b.start_at));
       const chipLimit=agendaView==='month'?3:5;
-      const chips=items.slice(0,chipLimit).map(a=>'<span class="agenda-day-chip '+(a.status==='cancelled'?'cancelled':a.status==='completed'?'completed':'')+'">'+appointmentTime(a.start_at)+' '+esc(a.notice_id?a.customer_name:'Cita')+'</span>').join('');
+      const chips=items.slice(0,chipLimit).map(a=>'<span class="agenda-day-chip '+(a.status==='cancelled'?'cancelled':a.status==='completed'?'completed':'')+'">'+appointmentTime(a.start_at)+' '+esc(a.notice_id?a.customer_name:(a.reason||'Cita'))+'</span>').join('');
       const more=items.length>chipLimit?'<small class="agenda-more">+'+(items.length-chipLimit)+' más</small>':'';
       const classes=['agenda-day-cell',agendaView==='month'&&date.getMonth()!==month?'other-month':'',key===today?'today':'',key===agendaSelectedDate?'selected':''].filter(Boolean).join(' ');
       return '<button type="button" class="'+classes+'" data-agenda-date="'+key+'"><span class="agenda-day-number">'+date.getDate()+'</span>'+chips+more+'</button>';
@@ -1390,7 +1403,7 @@ function renderAgenda() {
     const status=a.status==='cancelled'?'Anulada':a.status==='completed'?'Realizada':'Programada';
     const sync=a.google_event_id?'Sincronizada con Google Calendar':a.google_sync_error?'Pendiente de sincronizar con Google Calendar':'';
     const duration=Number(a.duration_minutes)||60;
-    return '<article class="agenda-event '+(a.status==='cancelled'?'cancelled':a.status==='completed'?'completed':'')+'"><div class="agenda-event-time">'+appointmentTime(a.start_at)+'<small>'+duration+' min</small></div><div class="agenda-event-info"><strong>'+esc(a.notice_id?a.customer_name:'Cita')+'</strong><span>'+esc(a.phone)+'</span><span>'+esc(a.address||appointmentAddressFromNotice(notices.find(n=>n.id===a.notice_id))||'Sin dirección indicada')+'</span><span>'+esc(a.notes||'')+'</span><small>'+status+(sync?' · '+sync:'')+'</small></div><div class="agenda-event-actions"><button type="button" class="outline-btn" data-edit-appointment="'+esc(a.id)+'">Editar</button>'+(a.status==='scheduled'?'<button type="button" class="outline-btn" data-complete-appointment="'+esc(a.id)+'">Realizada</button><button type="button" class="outline-btn" data-cancel-appointment="'+esc(a.id)+'">Anular</button>':'')+(a.status==='cancelled'?'<button type="button" class="outline-btn" data-reopen-appointment="'+esc(a.id)+'">Reprogramar</button>':'')+'<button type="button" class="mini-delete" data-delete-appointment="'+esc(a.id)+'" aria-label="Eliminar cita">×</button></div></article>';
+    return '<article class="agenda-event '+(a.status==='cancelled'?'cancelled':a.status==='completed'?'completed':'')+'"><div class="agenda-event-time">'+appointmentTime(a.start_at)+'<small>'+duration+' min</small></div><div class="agenda-event-info"><strong>'+esc(a.notice_id?a.customer_name:(a.reason||'Cita'))+'</strong><span>'+esc(a.phone)+'</span><span>'+esc(a.address||appointmentAddressFromNotice(notices.find(n=>n.id===a.notice_id))||'Sin dirección indicada')+'</span><span>'+(a.reason?'<span><b>Motivo:</b> '+esc(a.reason)+'</span>':'')+(a.notes?'<span>'+esc(a.notes)+'</span>':'')+'<small>'+status+(sync?' · '+sync:'')+'</small></div><div class="agenda-event-actions"><button type="button" class="outline-btn" data-edit-appointment="'+esc(a.id)+'">Editar</button>'+(a.status==='scheduled'?'<button type="button" class="outline-btn" data-complete-appointment="'+esc(a.id)+'">Realizada</button><button type="button" class="outline-btn" data-cancel-appointment="'+esc(a.id)+'">Anular</button>':'')+(a.status==='cancelled'?'<button type="button" class="outline-btn" data-reopen-appointment="'+esc(a.id)+'">Reprogramar</button>':'')+'<button type="button" class="mini-delete" data-delete-appointment="'+esc(a.id)+'" aria-label="Eliminar cita">×</button></div></article>';
   }).join('')||'<div class="empty">No hay citas para este día.</div>';
   $$('[data-agenda-date]',grid).forEach(button=>button.onclick=()=>{agendaSelectedDate=button.dataset.agendaDate;const date=new Date(agendaSelectedDate+'T12:00:00');agendaMonth=new Date(date.getFullYear(),date.getMonth(),1);renderAgenda();});
   $$('[data-edit-appointment]',dayList).forEach(button=>button.onclick=()=>openAppointmentDialog(appointments.find(a=>a.id===button.dataset.editAppointment)));
@@ -1413,17 +1426,19 @@ async function openAppointmentDialog(existing=null,overrides={}) {
   if(!isFree&&existing&&!eligible.some(n=>n.id===existing.notice_id)){toast('Solo se pueden agendar clientes con un aviso marcado como sacado.','Aviso no disponible');return;}
   const startDefault=overrides.start_at?new Date(overrides.start_at):source.start_at||defaultAppointmentStart();
   const appointmentFields=isFree?[
-      {key:'start_at',label:'Fecha y hora',type:'datetime-local',value:localDateTimeValue(startDefault),required:true},
       {key:'duration_minutes',label:'Duración en minutos',type:'number',value:source.duration_minutes||60,required:true},
       {key:'available_slots',label:'Ver huecos libres',type:'action',onAction:({backdrop})=>openFreeSlotsDialog(backdrop,source.id)},
+      {key:'start_at',label:'Fecha y hora (si ya tienes hora concreta)',type:'datetime-local',value:localDateTimeValue(startDefault),required:true},
+      {key:'reason',label:'Motivo de la cita',type:'textarea',value:source.reason||'',placeholder:'Ej.: revisión, reparación, visita'},
       {key:'address',label:'Lugar o dirección (opcional)',type:'text',value:source.address||''},
-      {key:'notes',label:'Notas',type:'textarea',value:source.notes||''},
+      {key:'notes',label:'Notas adicionales',type:'textarea',value:source.notes||''},
       {key:'status',label:'Estado',type:'select',value:overrides.status||((source.status==='cancelled')?'scheduled':source.status||'scheduled'),options:[{value:'scheduled',label:'Programada'},{value:'completed',label:'Realizada'}]}
     ]:[
       {key:'notice_id',label:'Buscar por nombre, teléfono o dirección',type:'search-select',value:requestedId,required:true,placeholder:'Escribe el nombre, teléfono o dirección',options:eligible.map(n=>({value:n.id,label:agendaNoticeLabel(n)}))},
-      {key:'start_at',label:'Fecha y hora',type:'datetime-local',value:localDateTimeValue(startDefault),required:true},
       {key:'duration_minutes',label:'Duración en minutos',type:'number',value:source.duration_minutes||60,required:true},
       {key:'available_slots',label:'Ver huecos libres',type:'action',onAction:({backdrop})=>openFreeSlotsDialog(backdrop,source.id)},
+      {key:'start_at',label:'Fecha y hora (si ya tienes hora concreta)',type:'datetime-local',value:localDateTimeValue(startDefault),required:true},
+      {key:'reason',label:'Motivo de la cita',type:'textarea',value:source.reason||'',placeholder:'Ej.: revisión, reparación, visita'},
       {key:'notes',label:'Notas para el técnico',type:'textarea',value:source.notes||''},
       {key:'status',label:'Estado',type:'select',value:overrides.status||((source.status==='cancelled')?'scheduled':source.status||'scheduled'),options:[{value:'scheduled',label:'Programada'},{value:'completed',label:'Realizada'}]}
     ];
@@ -1446,7 +1461,8 @@ async function openAppointmentDialog(existing=null,overrides={}) {
     start_at:start.toISOString(),
     duration_minutes:Math.max(15,Math.min(480,Number(answer.duration_minutes)||60)),
     address:selectedNotice?appointmentAddressFromNotice(selectedNotice)||null:answer.address.trim()||null,
-    notes:answer.notes.trim()||null,
+    reason:String(answer.reason||'').trim()||null,
+    notes:String(answer.notes||'').trim()||null,
     status:answer.status||'scheduled',
     updated_at:new Date().toISOString()
   };
@@ -1579,7 +1595,7 @@ function calendarEventBody(appointment) {
   return {
     summary:(appointment.notice_id?'Cita de reparación · ':'Agenda · ')+appointment.customer_name,
     location:appointment.address||'',
-    description:['Cliente: '+appointment.customer_name,'Teléfono: '+appointment.phone,appointment.notes||''].filter(Boolean).join('\n'),
+    description:['Cliente: '+appointment.customer_name,'Teléfono: '+appointment.phone,appointment.reason?'Motivo: '+appointment.reason:'',appointment.notes||''].filter(Boolean).join('\n'),
     start:{dateTime:new Date(appointment.start_at).toISOString(),timeZone:'Europe/Madrid'},
     end:{dateTime:end.toISOString(),timeZone:'Europe/Madrid'}
   };
@@ -1683,8 +1699,10 @@ function wireUI() {
   $('#noticeForm').addEventListener('submit',createNotice);
   $('#menuToggle').addEventListener('click',()=>$('#sidebar').classList.toggle('open'));
   $('#pendingLandingButton').addEventListener('click',openPendingNotices);
-  $('#pendingMetric').addEventListener('click',openPendingNotices);
-  $('#pendingMetric').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openPendingNotices();}});
+  $$('[data-notice-list]').forEach(card=>{
+    card.addEventListener('click',()=>openPendingNotices(card.dataset.noticeList));
+    card.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();openPendingNotices(card.dataset.noticeList);}});
+  });
   $('#exportBtn').addEventListener('click',()=>exportCsv(false));$('#reportExport').addEventListener('click',()=>exportCsv(true));
   $('#addField').addEventListener('click',addField);
   $$('[data-settings-tab]').forEach(button=>button.addEventListener('click',()=>showSettingsTab(button.dataset.settingsTab)));
