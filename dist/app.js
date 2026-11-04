@@ -32,8 +32,9 @@ function formDialog({title,description='',fields=[],confirmText='Guardar'}) {
       let control;
       if(f.type==='select')control=`<select name="${key}" ${required}>${(f.options||[]).map(o=>{const v=typeof o==='string'?o:o.value,l=typeof o==='string'?o:o.label;return `<option value="${esc(v)}" ${String(v)===String(f.value??'')?'selected':''}>${esc(l)}</option>`;}).join('')}</select>`;
       else if(f.type==='textarea')control=`<textarea name="${key}" rows="3" ${required} placeholder="${esc(f.placeholder||'')}">${value}</textarea>`;
-      else if(f.type==='checkbox')control=`<input name="${key}" type="checkbox" ${f.value?'checked':''} ${required}/>`;
+      else if(f.type==='checkbox')control=`<input name="${key}" type="checkbox" style="width:16px;height:16px;padding:0;margin:0;flex:0 0 16px;accent-color:var(--accent)" ${f.value?'checked':''} ${required}/>`;
       else control=`<input name="${key}" type="${esc(f.type||'text')}" value="${value}" ${required} placeholder="${esc(f.placeholder||'')}" ${f.autocomplete?`autocomplete="${esc(f.autocomplete)}"`:''}/>`;
+      if(f.type==='checkbox')return `<label class="field" style="display:flex;align-items:center;gap:9px;margin:12px 0">${control}<span style="margin:0">${label}</span></label>`;
       return `<label class="field" style="margin:12px 0"><span>${label}</span>${control}</label>`;
     }).join('');
     backdrop.innerHTML=`<form class="modal" style="max-height:90vh;overflow:auto" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>${esc(title)}</h2><p>${esc(description)}</p></div><button class="close" type="button" data-dialog-cancel aria-label="Cerrar">×</button></div>${controls}<div class="modal-actions"><button class="outline-btn" type="button" data-dialog-cancel>Cancelar</button><button class="primary-btn" type="submit">${esc(confirmText)}</button></div></form>`;
