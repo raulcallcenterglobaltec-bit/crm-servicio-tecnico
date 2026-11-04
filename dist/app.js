@@ -569,9 +569,18 @@ function renderClientHistoryDetail(availableGroups=clientHistoryGroups()) {
   host.innerHTML=`<article class="card history-summary"><h2>${esc(group.name)}</h2><p>${esc(group.phone||'Sin teléfono')} · Historial completo de esta empresa</p><div class="history-summary-counts"><span class="history-pill history-pill-notices">${counts}</span><span class="history-pill">${records.length} registros en total</span></div></article>${noticeCards||'<article class="card empty">Este cliente todavía no tiene avisos técnicos registrados.</article>'}${unlinked.length?`<article class="history-unlinked"><h3>Reclamaciones o anulaciones sin aviso vinculado (${unlinked.length})</h3><p style="margin:0 0 7px;color:#7d6b48;font-size:10px">Estos registros se buscaron por el teléfono, pero no se vinculó un aviso concreto al registrarlos.</p>${unlinked.sort((a,b)=>new Date(b.received_at)-new Date(a.received_at)).map(followupMarkup).join('')}</article>`:''}`;
   $$('[data-history-open]',host).forEach(button=>button.addEventListener('click',()=>showDetails(button.dataset.historyOpen)));
 }
+function canonicalNoticeStatus(value) {
+  const key=String(value??'').trim().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'');
+  if(['nuevo','pendiente','pendiente de gestion'].includes(key))return 'Nuevo';
+  if(['sale','sacado','aviso sacado','salio','salio adelante'].includes(key))return 'Sale';
+  if(['no sale','no sacado','aviso no sacado','no valido','aviso nulo'].includes(key))return 'No sale';
+  return null;
+}
 async function changeStatus(id,status,managementReason=null) {
   if(!canManageCurrentNotices())return false;
   const n=notices.find(x=>x.id===id);if(!n)return false;
+  status=canonicalNoticeStatus(status);
+  if(!status){toast('Selecciona Pendiente, Aviso sacado o Aviso no sacado.','Resultado no válido');return false;}
   const wasSale=n.status==='Sale';
   const tariff=tariffForNotice(n);
   const patch={status,managed_at:status==='Nuevo'?null:new Date().toISOString(),unit_price:status==='Sale'?Number(tariff?.price||0):0,management_reason:status==='No sale'?managementReason:null};
@@ -592,6 +601,8 @@ async function requestNoSaleReason(current='') {
 }
 async function handleNoticeStatusChange(id,status,select){
   const notice=notices.find(item=>item.id===id);if(!notice)return;
+  status=canonicalNoticeStatus(status);
+  if(!status){toast('Selecciona Pendiente, Aviso sacado o Aviso no sacado.','Resultado no válido');if(select)select.value=notice.status||'Nuevo';return;}
   let reason=null;
   if(status==='No sale'){
     reason=await requestNoSaleReason(notice.management_reason||'');
