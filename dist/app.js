@@ -637,7 +637,7 @@ async function editNotice(id){
     {key:'device',label:'Aparato',value:notice.device||''},
     {key:'brand',label:'Marca',value:notice.brand||''},
     {key:'issue',label:'Avería / detalle',type:'textarea',value:notice.issue||''},
-    {key:'management_reason',label:'Motivo de no sacado',type:'textarea',value:notice.management_reason||'',required:notice.status==='No sale'}
+    ...(notice.status==='No sale'?[{key:'management_reason',label:'Motivo de no sacado',type:'textarea',value:notice.management_reason||'',required:true}]:[])
   ];
   const baseKeys=new Set(base.map(field=>field.key));
   const definitions=(notice.created_by?fieldsForPhone():fieldsForLanding(notice.landing_id)).filter(field=>!baseKeys.has(field.field_key));
