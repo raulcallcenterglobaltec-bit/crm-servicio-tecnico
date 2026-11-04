@@ -9,7 +9,7 @@ const categoryFor = device => /aire acondicionado|aerotermia|bomba de calor|acs|
 let user=null, isSuperAdmin=false, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, realtimeCompanyId=null, membershipLoadPromise=null, membershipLoadStage='inicio', noticeSource='landing', fieldScope='phone', noticeView='table', relatedNoticeMatch=null, selectedHistoryKey=null, duplicatePhoneBypass=null;
 let landingRoutes={}, notificationChannels=[], formDestinations={}, globalFormRoutes=[];
 let landingListCollapsed=localStorage.getItem('crm-landings-list-collapsed')==='true';
-let fieldEditorRows=[];
+let fieldEditorRows=[],fieldDragSource=null;
 let authMode='login', selectedDate=new Date().toISOString().slice(0,10), showResendConfirmation=false;
 const defaultFields=[
   {field_key:'customer_name',label:'Nombre y apellidos',field_type:'text',required:true,visible_in_form:true,visible_in_table:true,visible_on_card:true,position:1},
@@ -809,28 +809,42 @@ async function renderFields() {
   const selectedLanding=fieldScope==='landing'?($('#fieldLandingFilter')?.value||''):null;
   fieldEditorRows=fields.filter(f=>f.channel===fieldScope&&(fieldScope==='phone'?!f.landing_id:(selectedLanding?f.landing_id===selectedLanding:!f.landing_id))).sort((a,b)=>(a.position||0)-(b.position||0));
   const title=$('#fieldEditorTitle');if(title)title.textContent=fieldScope==='phone'?'Campos de llamadas telefónicas':'Campos de aviso por landing';
-  const description=$('#fieldEditorDescription');if(description)description.textContent=fieldScope==='phone'?'Estos campos se comparten entre avisos, reclamaciones y anulaciones por teléfono. «Obligatorio» exige el dato; «Ver en tabla» lo muestra en la lista; «Ver en tarjetas» lo muestra en el tablero; «Mostrar al registrar llamada» lo incluye en el formulario telefónico.':'Los campos generales se aplican a todas las landing. «Obligatorio» exige el dato; «Ver en tabla» y «Ver en tarjetas» deciden dónde aparece en el CRM; «Incluir en formulario web» lo añade al formulario. Selecciona una landing para configurar sus campos específicos.';
+  const description=$('#fieldEditorDescription');if(description)description.textContent=fieldScope==='phone'?'Estos campos se comparten entre avisos, reclamaciones y anulaciones por teléfono. «Obligatorio» exige el dato; «Ver en tabla» lo muestra en la lista; «Ver en tarjetas» lo muestra en el tablero; «Mostrar al registrar llamada» lo incluye en el formulario telefónico. Arrastra las tarjetas para cambiar el orden.':'Los campos generales se aplican a todas las landing. «Obligatorio» exige el dato; «Ver en tabla» y «Ver en tarjetas» deciden dónde aparece en el CRM; «Incluir en formulario web» lo añade al formulario. Selecciona una landing para configurar sus campos específicos. Arrastra las tarjetas para cambiar el orden.';
   const landingWrap=$('#landingFieldControls');if(landingWrap)landingWrap.hidden=fieldScope==='phone';
   const typeNames={text:'Texto',phone:'Teléfono',email:'Correo',number:'Número',date:'Fecha',select:'Lista',textarea:'Texto largo',checkbox:'Casilla'};
   const formColumnLabel=fieldScope==='phone'?'Mostrar en el formulario de llamada':'Incluir en el formulario web';
-  list.innerHTML=fieldEditorRows.map((f,i)=>`<div class="field-config-card"><div class="field-config-main"><input data-field-label="${i}" aria-label="Nombre del campo" value="${esc(f.label)}"/><select data-field-type="${i}" aria-label="Tipo de campo">${Object.entries(typeNames).map(([key,label])=>`<option value="${key}" ${f.field_type===key?'selected':''}>${label}</option>`).join('')}</select><div style="display:flex;gap:3px;justify-content:flex-end"><button type="button" class="outline-btn" data-field-move="-1:${i}" aria-label="Mover ${esc(f.label)} hacia arriba" title="Mover arriba" ${i===0?'disabled':''} style="width:25px;height:27px;padding:0;font-size:14px">↑</button><button type="button" class="outline-btn" data-field-move="1:${i}" aria-label="Mover ${esc(f.label)} hacia abajo" title="Mover abajo" ${i===fieldEditorRows.length-1?'disabled':''} style="width:25px;height:27px;padding:0;font-size:14px">↓</button><button type="button" class="mini-delete" data-field-delete="${i}" aria-label="Eliminar campo">×</button></div><small>${fieldScope==='phone'?'Todas las llamadas':f.landing_id?esc(landingName(f.landing_id)):'Todas las landings'}</small></div><div class="field-config-options"><div class="field-option-set"><strong>Requisito</strong><label title="La persona tendrá que rellenar este dato"><input type="checkbox" data-field-required="${i}" ${f.required?'checked':''}/> Obligatorio</label></div><div class="field-option-set"><strong>Mostrar en el CRM</strong><label title="Mostrar este dato como columna en la tabla de avisos"><input type="checkbox" data-field-table="${i}" ${f.visible_in_table?'checked':''}/> En tabla</label><label title="Mostrar este dato en las tarjetas del tablero"><input type="checkbox" data-field-card-config="${i}" ${f.visible_on_card?'checked':''} ${f.field_key==='customer_name'?'disabled':''}/> En tarjetas</label></div><div class="field-option-set"><strong>${fieldScope==='phone'?'Formulario de llamada':'Formulario web'}</strong><label title="${fieldScope==='phone'?'Mostrar al registrar avisos, reclamaciones o anulaciones':'Incluir este campo en el formulario de la landing'}"><input type="checkbox" data-field-form="${i}" ${f.visible_in_form?'checked':''}/> ${formColumnLabel}</label></div></div></div>`).join('')||'<div class="empty">No hay campos exclusivos en esta selección. Los campos generales se mantienen si has seleccionado una landing.</div>';
+  list.innerHTML=fieldEditorRows.map((f,i)=>`<div class="field-config-card" draggable="true" data-field-card="${i}" aria-label="Arrastra para cambiar el orden de ${esc(f.label)}"><div class="field-config-main"><input data-field-label="${i}" aria-label="Nombre del campo" value="${esc(f.label)}"/><select data-field-type="${i}" aria-label="Tipo de campo">${Object.entries(typeNames).map(([key,label])=>`<option value="${key}" ${f.field_type===key?'selected':''}>${label}</option>`).join('')}</select><button type="button" class="mini-delete" data-field-delete="${i}" aria-label="Eliminar campo">×</button><small>${fieldScope==='phone'?'Todas las llamadas':f.landing_id?esc(landingName(f.landing_id)):'Todas las landings'}</small></div><div class="field-config-options"><div class="field-option-set"><strong>Requisito</strong><label title="La persona tendrá que rellenar este dato"><input type="checkbox" data-field-required="${i}" ${f.required?'checked':''}/> Obligatorio</label></div><div class="field-option-set"><strong>Mostrar en el CRM</strong><label title="Mostrar este dato como columna en la tabla de avisos"><input type="checkbox" data-field-table="${i}" ${f.visible_in_table?'checked':''}/> En tabla</label><label title="Mostrar este dato en las tarjetas del tablero"><input type="checkbox" data-field-card-config="${i}" ${f.visible_on_card?'checked':''} ${f.field_key==='customer_name'?'disabled':''}/> En tarjetas</label></div><div class="field-option-set"><strong>${fieldScope==='phone'?'Formulario de llamada':'Formulario web'}</strong><label title="${fieldScope==='phone'?'Mostrar al registrar avisos, reclamaciones o anulaciones':'Incluir este campo en el formulario de la landing'}"><input type="checkbox" data-field-form="${i}" ${f.visible_in_form?'checked':''}/> ${formColumnLabel}</label></div></div></div>`).join('')||'<div class="empty">No hay campos exclusivos en esta selección. Los campos generales se mantienen si has seleccionado una landing.</div>';
   $$('[data-field-label]').forEach(x=>x.addEventListener('change',async e=>{const i=+e.target.dataset.fieldLabel,label=e.target.value.trim();if(!label){e.target.value=fieldEditorRows[i].label;return;}await saveField(i,{label});}));
   $$('[data-field-type]').forEach(x=>x.addEventListener('change',async e=>{const i=+e.target.dataset.fieldType,field_type=e.target.value;let options=fieldEditorRows[i].options||[];if(field_type==='select'){const answer=await formDialog({title:'Opciones del campo',description:'Escribe las opciones separadas por comas.',fields:[{key:'options',label:'Opciones',type:'text',value:options.join(', '),required:true}]});if(!answer){renderFields();return;}options=answer.options.split(',').map(v=>v.trim()).filter(Boolean);}await saveField(i,{field_type,options});}));
   $$('[data-field-required]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldRequired,{required:e.target.checked})));
   $$('[data-field-table]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldTable,{visible_in_table:e.target.checked})));
   $$('[data-field-card-config]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldCardConfig,{visible_on_card:e.target.checked})));
-  $('[data-field-form]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldForm,{visible_in_form:e.target.checked})));
-  $('[data-field-move]').forEach(button=>button.addEventListener('click',()=>{const [direction,index]=button.dataset.fieldMove.split(':').map(Number);moveField(index,direction);}));
+  $$('[data-field-form]').forEach(x=>x.addEventListener('change',e=>saveField(+e.target.dataset.fieldForm,{visible_in_form:e.target.checked})));
+  $$('[data-field-card]',list).forEach(card=>{
+    card.addEventListener('dragstart',event=>{
+      fieldDragSource=Number(card.dataset.fieldCard);
+      card.classList.add('dragging');
+      if(event.dataTransfer){event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',String(fieldDragSource));}
+    });
+    card.addEventListener('dragover',event=>{event.preventDefault();if(event.dataTransfer)event.dataTransfer.dropEffect='move';card.classList.add('drag-over');});
+    card.addEventListener('dragleave',()=>card.classList.remove('drag-over'));
+    card.addEventListener('drop',async event=>{
+      event.preventDefault();card.classList.remove('drag-over');
+      const source=Number.isInteger(fieldDragSource)?fieldDragSource:Number(event.dataTransfer?.getData('text/plain'));
+      const target=Number(card.dataset.fieldCard);fieldDragSource=null;
+      if(Number.isInteger(source)&&source>=0&&source!==target)await moveFieldTo(source,target);
+    });
+    card.addEventListener('dragend',()=>{fieldDragSource=null;card.classList.remove('dragging');$$('[data-field-card].drag-over',list).forEach(el=>el.classList.remove('drag-over'));});
+  });
   $$('[data-field-delete]').forEach(x=>x.addEventListener('click',async e=>{const f=fieldEditorRows[+e.target.dataset.fieldDelete];if(!await confirmDialog(`¿Eliminar el campo «${f.label}» de futuras entradas?`))return;const {error}=await db.from('notice_fields').delete().eq('id',f.id);if(error)toast(errorText(error),'Error');else{fields=fields.filter(x=>x.id!==f.id);renderFields();renderRows();renderExtraFields();}}));
 }
-async function moveField(index,direction) {
-  const target=index+direction;
-  if(target<0||target>=fieldEditorRows.length)return;
-  const ordered=[...fieldEditorRows];
-  [ordered[index],ordered[target]]=[ordered[target],ordered[index]];
+async function moveFieldTo(sourceIndex,targetIndex) {
+  if(sourceIndex<0||targetIndex<0||sourceIndex>=fieldEditorRows.length||targetIndex>=fieldEditorRows.length||sourceIndex===targetIndex)return;
+  const ordered=[...fieldEditorRows],moved=ordered.splice(sourceIndex,1)[0];
+  ordered.splice(targetIndex,0,moved);
   const results=await Promise.all(ordered.map((field,position)=>db.from('notice_fields').update({position:position+1}).eq('id',field.id)));
   const failed=results.find(result=>result.error);
-  if(failed){toast(errorText(failed.error),'No se pudo cambiar el orden');renderFields();return;}
+  if(failed){toast(errorText(failed.error),'No se pudo guardar el orden');renderFields();return;}
   ordered.forEach((field,position)=>{field.position=position+1;});
   renderFields();renderRows();renderExtraFields();
 }
@@ -952,7 +966,7 @@ function showDuplicatePhoneDialog(matches,normalizedPhone) {
   backdrop.innerHTML='<div class="modal" style="width:min(760px,calc(100vw - 28px));max-height:90vh;overflow:auto" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>Cliente repetido</h2><p>Este teléfono ya aparece en '+matches.length+' '+(matches.length===1?'aviso':'avisos')+' de la empresa. Revisa el historial y decide cómo registrarlo.</p></div><button type="button" class="close" data-duplicate-cancel aria-label="Cerrar">×</button></div><div style="display:grid;gap:8px;margin:14px 0">'+rows+'</div>'+extra+'<p style="font-size:12px;color:#68758a">Puedes consultar el aviso anterior o crear una reclamación vinculada. Si se trata de otra avería, también puedes crear un aviso nuevo.</p><div class="modal-actions"><button type="button" class="outline-btn" data-duplicate-cancel>Volver al aviso</button><button type="button" class="primary-btn" data-duplicate-new>Aun así, crear aviso nuevo</button></div></div>';
   const close=()=>backdrop.remove();
   backdrop.addEventListener('click',e=>{if(e.target===backdrop||e.target.closest('[data-duplicate-cancel]'))close();});
-  $('[data-duplicate-view]',backdrop).forEach(button=>button.onclick=()=>showDetails(button.dataset.duplicateView));
+  $$('[data-duplicate-view]',backdrop).forEach(button=>button.onclick=()=>showDetails(button.dataset.duplicateView));
   $$('[data-duplicate-claim]',backdrop).forEach(button=>button.onclick=async()=>{const id=button.dataset.duplicateClaim;close();await openPhoneNotice('reclamacion',id);});
   $('[data-duplicate-new]',backdrop).onclick=()=>{close();duplicatePhoneBypass=normalizedPhone;$('#noticeForm').requestSubmit();};
   document.body.append(backdrop);
