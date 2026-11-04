@@ -1367,7 +1367,7 @@ function renderAgenda() {
       const cards=items.map(item=>{
         const address=item.address||appointmentAddressFromNotice(notices.find(n=>n.id===item.notice_id));
         const stateClass=item.status==='cancelled'?'cancelled':item.status==='completed'?'completed':'';
-        return '<article class="agenda-hour-event '+stateClass+'"><strong>'+appointmentTime(item.start_at)+' · '+esc(item.customer_name)+'</strong><span>'+esc(item.phone)+(address?' · '+esc(address):'')+'</span></article>';
+        return '<article class="agenda-hour-event '+stateClass+'"><strong>'+appointmentTime(item.start_at)+' · '+esc(item.notice_id?item.customer_name:'Cita')+'</strong><span>'+esc(item.phone)+(address?' · '+esc(address):'')+'</span></article>';
       }).join('');
       return '<div class="agenda-hour-row"><div class="agenda-hour-label">'+label+'</div><div class="agenda-hour-events">'+(cards||'<div class="agenda-hour-empty"></div>')+'</div></div>';
     }).join('');
@@ -1376,7 +1376,7 @@ function renderAgenda() {
     grid.innerHTML=dates.map(date=>{
       const key=localDateKey(date),items=visible.filter(a=>localDateKey(a.start_at)===key).sort((a,b)=>new Date(a.start_at)-new Date(b.start_at));
       const chipLimit=agendaView==='month'?3:5;
-      const chips=items.slice(0,chipLimit).map(a=>'<span class="agenda-day-chip '+(a.status==='cancelled'?'cancelled':a.status==='completed'?'completed':'')+'">'+appointmentTime(a.start_at)+' '+esc(a.customer_name)+'</span>').join('');
+      const chips=items.slice(0,chipLimit).map(a=>'<span class="agenda-day-chip '+(a.status==='cancelled'?'cancelled':a.status==='completed'?'completed':'')+'">'+appointmentTime(a.start_at)+' '+esc(a.notice_id?a.customer_name:'Cita')+'</span>').join('');
       const more=items.length>chipLimit?'<small class="agenda-more">+'+(items.length-chipLimit)+' más</small>':'';
       const classes=['agenda-day-cell',agendaView==='month'&&date.getMonth()!==month?'other-month':'',key===today?'today':'',key===agendaSelectedDate?'selected':''].filter(Boolean).join(' ');
       return '<button type="button" class="'+classes+'" data-agenda-date="'+key+'"><span class="agenda-day-number">'+date.getDate()+'</span>'+chips+more+'</button>';
@@ -1390,7 +1390,7 @@ function renderAgenda() {
     const status=a.status==='cancelled'?'Anulada':a.status==='completed'?'Realizada':'Programada';
     const sync=a.google_event_id?'Sincronizada con Google Calendar':a.google_sync_error?'Pendiente de sincronizar con Google Calendar':'';
     const duration=Number(a.duration_minutes)||60;
-    return '<article class="agenda-event '+(a.status==='cancelled'?'cancelled':a.status==='completed'?'completed':'')+'"><div class="agenda-event-time">'+appointmentTime(a.start_at)+'<small>'+duration+' min</small></div><div class="agenda-event-info"><strong>'+esc(a.customer_name)+'</strong><span>'+esc(a.phone)+'</span><span>'+esc(a.address||appointmentAddressFromNotice(notices.find(n=>n.id===a.notice_id))||'Sin dirección indicada')+'</span><span>'+esc(a.notes||'')+'</span><small>'+status+(sync?' · '+sync:'')+'</small></div><div class="agenda-event-actions"><button type="button" class="outline-btn" data-edit-appointment="'+esc(a.id)+'">Editar</button>'+(a.status==='scheduled'?'<button type="button" class="outline-btn" data-complete-appointment="'+esc(a.id)+'">Realizada</button><button type="button" class="outline-btn" data-cancel-appointment="'+esc(a.id)+'">Anular</button>':'')+(a.status==='cancelled'?'<button type="button" class="outline-btn" data-reopen-appointment="'+esc(a.id)+'">Reprogramar</button>':'')+'<button type="button" class="mini-delete" data-delete-appointment="'+esc(a.id)+'" aria-label="Eliminar cita">×</button></div></article>';
+    return '<article class="agenda-event '+(a.status==='cancelled'?'cancelled':a.status==='completed'?'completed':'')+'"><div class="agenda-event-time">'+appointmentTime(a.start_at)+'<small>'+duration+' min</small></div><div class="agenda-event-info"><strong>'+esc(a.notice_id?a.customer_name:'Cita')+'</strong><span>'+esc(a.phone)+'</span><span>'+esc(a.address||appointmentAddressFromNotice(notices.find(n=>n.id===a.notice_id))||'Sin dirección indicada')+'</span><span>'+esc(a.notes||'')+'</span><small>'+status+(sync?' · '+sync:'')+'</small></div><div class="agenda-event-actions"><button type="button" class="outline-btn" data-edit-appointment="'+esc(a.id)+'">Editar</button>'+(a.status==='scheduled'?'<button type="button" class="outline-btn" data-complete-appointment="'+esc(a.id)+'">Realizada</button><button type="button" class="outline-btn" data-cancel-appointment="'+esc(a.id)+'">Anular</button>':'')+(a.status==='cancelled'?'<button type="button" class="outline-btn" data-reopen-appointment="'+esc(a.id)+'">Reprogramar</button>':'')+'<button type="button" class="mini-delete" data-delete-appointment="'+esc(a.id)+'" aria-label="Eliminar cita">×</button></div></article>';
   }).join('')||'<div class="empty">No hay citas para este día.</div>';
   $$('[data-agenda-date]',grid).forEach(button=>button.onclick=()=>{agendaSelectedDate=button.dataset.agendaDate;const date=new Date(agendaSelectedDate+'T12:00:00');agendaMonth=new Date(date.getFullYear(),date.getMonth(),1);renderAgenda();});
   $$('[data-edit-appointment]',dayList).forEach(button=>button.onclick=()=>openAppointmentDialog(appointments.find(a=>a.id===button.dataset.editAppointment)));
@@ -1409,12 +1409,10 @@ async function openAppointmentDialog(existing=null,overrides={}) {
   const eligible=agendaEligibleNotices(),source=existing||{};
   const isFree=!!(existing&&!existing.notice_id)||overrides.type==='free';
   const requestedId=existing?.notice_id||overrides.notice_id||'';
-  if(!isFree&&!eligible.length){toast('Para agendar con un cliente, primero debe existir un aviso marcado como sacado. También puedes crear una cita libre.','No hay avisos sacados');return;}
+  if(!isFree&&!eligible.length){toast('Para agendar con un cliente, primero debe existir un aviso marcado como sacado. También puedes agendar una cita sin asociarla a un cliente.','No hay avisos sacados');return;}
   if(!isFree&&existing&&!eligible.some(n=>n.id===existing.notice_id)){toast('Solo se pueden agendar clientes con un aviso marcado como sacado.','Aviso no disponible');return;}
   const startDefault=overrides.start_at?new Date(overrides.start_at):source.start_at||defaultAppointmentStart();
-  const freeType=source.customer_name==='Asuntos personales'?'Asuntos personales':'Cita libre';
   const appointmentFields=isFree?[
-      {key:'appointment_type',label:'Tipo',type:'select',value:freeType,options:[{value:'Cita libre',label:'Cita libre'},{value:'Asuntos personales',label:'Asuntos personales'}]},
       {key:'start_at',label:'Fecha y hora',type:'datetime-local',value:localDateTimeValue(startDefault),required:true},
       {key:'duration_minutes',label:'Duración en minutos',type:'number',value:source.duration_minutes||60,required:true},
       {key:'available_slots',label:'Ver huecos libres',type:'action',onAction:({backdrop})=>openFreeSlotsDialog(backdrop,source.id)},
@@ -1430,8 +1428,8 @@ async function openAppointmentDialog(existing=null,overrides={}) {
       {key:'status',label:'Estado',type:'select',value:overrides.status||((source.status==='cancelled')?'scheduled':source.status||'scheduled'),options:[{value:'scheduled',label:'Programada'},{value:'completed',label:'Realizada'}]}
     ];
   const answer=await formDialog({
-    title:existing?'Editar cita':isFree?'Cita libre o asuntos personales':'Agendar cita',
-    description:isFree?'Añade un hueco sin asociarlo a un cliente o aviso.':'Elige un aviso sacado. El cliente y su teléfono se completan desde ese aviso.',
+    title:existing?'Editar cita':'Agendar cita',
+    description:isFree?'Completa los datos de la cita.':'Elige un aviso sacado. El cliente y su teléfono se completan desde ese aviso.',
     fields:appointmentFields,
     confirmText:'Guardar cita'
   });
@@ -1443,7 +1441,7 @@ async function openAppointmentDialog(existing=null,overrides={}) {
   const payload={
     company_id:currentCompany.id,
     notice_id:selectedNotice?.id||null,
-    customer_name:selectedNotice?(selectedNotice.customer_name||'Cliente'):answer.appointment_type,
+    customer_name:selectedNotice?(selectedNotice.customer_name||'Cliente'):'Cita',
     phone:selectedNotice?.phone||'',
     start_at:start.toISOString(),
     duration_minutes:Math.max(15,Math.min(480,Number(answer.duration_minutes)||60)),
