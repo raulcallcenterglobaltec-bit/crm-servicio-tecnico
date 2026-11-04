@@ -1072,13 +1072,18 @@ async function createNotice(event) {
     if(matches.length&&duplicatePhoneBypass!==normalizedPhone){showDuplicatePhoneDialog(matches,normalizedPhone,saveAndSchedule?'saveAndSchedule':'saveNotice');return;}
   }
   duplicatePhoneBypass=null;
-  const submitButtons=$$('#noticeForm button[type="submit"]');
+  let managementReason=null;
+  if(type==='aviso'&&$('#fStatus').value==='No sale'){
+    managementReason=await requestNoSaleReason();
+    if(managementReason===null)return;
+  }
+  const submitButtons=$('#noticeForm button[type="submit"]');
   submitButtons.forEach(button=>button.disabled=true);
   const v=id=>$('#'+id).value.trim();
   const isPhoneNotice=type==='aviso',device=isPhoneNotice?v('fDevice'):'';const custom_fields={};
   $$('[data-custom-key]', $('#noticeForm')).forEach(el=>{const c=$('input,select,textarea',el);custom_fields[el.dataset.customKey]=c.type==='checkbox'?c.checked:c.value;});
   const category=categoryFor(device);
-  const row={company_id:currentCompany.id,landing_id:null,notice_type:type,status:v('fStatus')||'Nuevo',customer_name:v('fName'),phone:v('fPhone'),email:$('#fEmail')?.value?.trim()||null,locality:v('fLocality')||null,postal_code:v('fPostal')||null,device:device||null,category:isPhoneNotice?category:null,brand:isPhoneNotice?(v('fBrand')||null):null,issue:v('fIssue')||null,custom_fields,unit_price:0,created_by:user.id};
+  const row={company_id:currentCompany.id,landing_id:null,notice_type:type,status:v('fStatus')||'Nuevo',customer_name:v('fName'),phone:v('fPhone'),email:$('#fEmail')?.value?.trim()||null,locality:v('fLocality')||null,postal_code:v('fPostal')||null,device:device||null,category:isPhoneNotice?category:null,brand:isPhoneNotice?(v('fBrand')||null):null,issue:v('fIssue')||null,custom_fields,unit_price:0,management_reason:managementReason,created_by:user.id};
   if(!isPhoneNotice&&relatedNoticeMatch)row.related_notice_id=relatedNoticeMatch.id;
   if(row.status==='Sale'&&isPhoneNotice)row.unit_price=Number(tariffForNotice(row)?.price||0);
   const {data,error}=await db.from('notices').insert(row).select().single();
