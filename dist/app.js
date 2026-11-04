@@ -495,6 +495,23 @@ function showDetails(id) {
   const resultLabel=n.notice_type==='aviso'?statusLabel(n.status):n.status==='Sale'?'Envío solicitado':n.status==='No sale'?'No es nuestra (cliente equivocado)':'Registro anterior';
   infoDialog('Detalle del registro',`Tipo: ${typeLabel}\nCliente: ${n.customer_name}\nTeléfono: ${n.phone}\nCorreo: ${n.email||'—'}\nAparato: ${n.device||'—'}\nOrigen: ${sourceLabel}\nResultado: ${resultLabel}\nRecibido: ${formatDate(n.received_at)}\nLocalidad: ${n.locality||'—'}\nCódigo postal: ${n.postal_code||'—'}\nMarca: ${n.brand||'—'}\nDetalle: ${n.issue||'—'}\n${custom}`);
 }
+function installPendingUi() {
+  if(!$('#pendingUiStyles')) {
+    const style=document.createElement('style');style.id='pendingUiStyles';
+    style.textContent='.metric-clickable{cursor:pointer;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}.metric-clickable:hover{transform:translateY(-2px);border-color:#f3c369;box-shadow:0 10px 26px rgba(28,42,69,.12)}.metric-clickable:focus-visible{outline:3px solid rgba(229,44,13,.35);outline-offset:3px}.pending-modal{width:min(760px,calc(100vw - 28px));max-height:calc(100vh - 36px);overflow:auto}.pending-modal .modal-head{align-items:flex-start}.pending-modal .modal-head p{margin:5px 0 0;color:#7d8798;font-size:12px}.pending-list{display:grid;gap:9px;margin:14px 0}.pending-item{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;padding:13px 15px;background:#fff;border:1px solid #e5e9f1;border-radius:11px;color:#17243a;cursor:pointer;transition:border-color .15s,background .15s,transform .15s}.pending-item:hover,.pending-item:focus-visible{border-color:#e44820;background:#fffaf8;transform:translateY(-1px);outline:none}.pending-item-main{display:grid;gap:4px;min-width:0}.pending-item-main strong{font-size:13px}.pending-item-main span{font-size:12px;color:#4e5d73}.pending-item-main small{font-size:10px;color:#8490a2}.pending-item-action{display:flex;align-items:center;gap:8px;color:#df2c0b;font-size:12px;font-weight:700;white-space:nowrap}.pending-item-action b{font-size:20px}.pending-hint{margin:12px 0 0;color:#7d8798;font-size:11px}.pending-empty{padding:32px 12px;display:grid;gap:7px;text-align:center;color:#7d8798;font-size:12px}.pending-empty strong{color:#18243a;font-size:16px}.pending-back{border:0;background:none;color:#df2c0b;font-family:inherit;font-size:12px;font-weight:600;padding:0;margin:0 0 14px;cursor:pointer}.pending-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.pending-detail-item{min-width:0;border:1px solid #e7eaf0;border-radius:9px;padding:10px 11px;display:grid;gap:5px;background:#fbfcfe}.pending-detail-item span{font-size:10px;color:#8490a2;text-transform:uppercase;letter-spacing:.04em}.pending-detail-item strong{font-size:13px;color:#202d43;white-space:pre-wrap;overflow-wrap:anywhere}.pending-detail-item.wide{grid-column:1/-1}.pending-status-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:18px;flex-wrap:wrap}.pending-status-actions button:disabled{opacity:.55;cursor:not-allowed}@media(max-width:560px){.pending-detail-grid{grid-template-columns:1fr}.pending-item{align-items:flex-start;flex-direction:column}.pending-item-action{align-self:flex-end}.pending-status-actions button{flex:1}}';
+    document.head.append(style);
+  }
+  const metric=$('#mNew')?.closest('.metric');
+  if(metric) {
+    metric.id='pendingMetric';metric.classList.add('metric-clickable');
+    metric.setAttribute('role','button');metric.setAttribute('tabindex','0');
+    metric.setAttribute('aria-label','Revisar avisos pendientes');
+    const foot=$('.metric-foot',metric);if(foot)foot.textContent='Pendientes de gestión · Pulsa para revisar';
+  }
+  const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
+  let textNode;
+  while((textNode=walker.nextNode()))if(textNode.nodeValue.includes('Aviso Nulo'))textNode.nodeValue=textNode.nodeValue.replaceAll('Aviso Nulo','Aviso no sacado');
+}
 function pendingNoticeRows() {
   const landingFilter=noticeSource==='landing'?($('#landingFilter')?.value||'all'):'all';
   return notices.filter(n=>n.notice_type==='aviso'&&n.status==='Nuevo'
@@ -989,6 +1006,7 @@ function showPage(name) {
   $('#sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'});
 }
 function wireUI() {
+  installPendingUi();
   $('#sidebar').addEventListener('click',event=>{const button=event.target.closest('button[data-page]');if(button){event.preventDefault();showPage(button.dataset.page);}});
   setupDate('main');setupDate('report');
   ['tableSearch','globalSearch'].forEach(id=>$('#'+id).addEventListener('input',renderRows));
