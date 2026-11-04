@@ -1224,7 +1224,8 @@ async function renderIntegrations() {
   const integrationToggles=[['toggleLandingBlock','landingBlockBody','landings'],['toggleNotificationBlock','notificationBlockBody','notifications'],['toggleCalendarBlock','calendarBlockBody','calendar']];
   integrationToggles.forEach(([buttonId,bodyId,key])=>{
     const button=$('#'+buttonId),body=$('#'+bodyId);if(!button||!body)return;
-    const apply=()=>{const expanded=!!integrationBlocksExpanded[key];body.hidden=!expanded;button.textContent=expanded?'Ocultar':'Mostrar';button.setAttribute('aria-expanded',String(expanded));};
+    const labels={landings:['Mostrar landings','Ocultar landings'],notifications:['Mostrar canales','Ocultar canales'],calendar:['Mostrar Google Calendar','Ocultar Google Calendar']}[key]||['Mostrar','Ocultar'];
+    const apply=()=>{const expanded=!!integrationBlocksExpanded[key];body.hidden=!expanded;button.textContent=labels[expanded?1:0];button.setAttribute('aria-expanded',String(expanded));};
     apply();button.onclick=()=>{integrationBlocksExpanded[key]=!integrationBlocksExpanded[key];apply();};
   });
 
@@ -1353,14 +1354,30 @@ function renderAgenda() {
   }
   $$('[data-agenda-view]').forEach(button=>button.classList.toggle('active',button.dataset.agendaView===agendaView));
   const today=localDateKey(new Date()),visible=agendaVisibleAppointments();
-  grid.innerHTML=dates.map(date=>{
-    const key=localDateKey(date),items=visible.filter(a=>localDateKey(a.start_at)===key).sort((a,b)=>new Date(a.start_at)-new Date(b.start_at));
-    const chipLimit=agendaView==='month'?2:4;
-    const chips=items.slice(0,chipLimit).map(a=>'<span class="agenda-day-chip '+(a.status==='cancelled'?'cancelled':a.status==='completed'?'completed':'')+'">'+appointmentTime(a.start_at)+' '+esc(a.customer_name)+'</span>').join('');
-    const more=items.length>chipLimit?'<small class="agenda-more">+'+(items.length-chipLimit)+' más</small>':'';
-    const classes=['agenda-day-cell',agendaView==='month'&&date.getMonth()!==month?'other-month':'',key===today?'today':'',key===agendaSelectedDate?'selected':''].filter(Boolean).join(' ');
-    return '<button type="button" class="'+classes+'" data-agenda-date="'+key+'"><span class="agenda-day-number">'+date.getDate()+'</span>'+chips+more+'</button>';
-  }).join('');
+  if(agendaView==='day'){
+    grid.style.display='block';grid.style.maxHeight='70vh';grid.style.overflowY='auto';
+    const dayAppointments=visible.filter(item=>localDateKey(item.start_at)===agendaSelectedDate).sort((a,b)=>new Date(a.start_at)-new Date(b.start_at));
+    grid.innerHTML=Array.from({length:13},(_,index)=>{
+      const hour=8+index,label=String(hour).padStart(2,'0')+':00';
+      const items=dayAppointments.filter(item=>new Date(item.start_at).getHours()===hour);
+      const cards=items.map(item=>{
+        const address=item.address||appointmentAddressFromNotice(notices.find(n=>n.id===item.notice_id));
+        const stateClass=item.status==='cancelled'?'cancelled':item.status==='completed'?'completed':'';
+        return '<article class="agenda-hour-event '+stateClass+'"><strong>'+appointmentTime(item.start_at)+' · '+esc(item.customer_name)+'</strong><span>'+esc(item.phone)+(address?' · '+esc(address):'')+'</span></article>';
+      }).join('');
+      return '<div class="agenda-hour-row"><div class="agenda-hour-label">'+label+'</div><div class="agenda-hour-events">'+(cards||'<div class="agenda-hour-empty"></div>')+'</div></div>';
+    }).join('');
+  } else {
+    grid.style.display='grid';grid.style.maxHeight='';grid.style.overflowY='';
+    grid.innerHTML=dates.map(date=>{
+      const key=localDateKey(date),items=visible.filter(a=>localDateKey(a.start_at)===key).sort((a,b)=>new Date(a.start_at)-new Date(b.start_at));
+      const chipLimit=agendaView==='month'?3:5;
+      const chips=items.slice(0,chipLimit).map(a=>'<span class="agenda-day-chip '+(a.status==='cancelled'?'cancelled':a.status==='completed'?'completed':'')+'">'+appointmentTime(a.start_at)+' '+esc(a.customer_name)+'</span>').join('');
+      const more=items.length>chipLimit?'<small class="agenda-more">+'+(items.length-chipLimit)+' más</small>':'';
+      const classes=['agenda-day-cell',agendaView==='month'&&date.getMonth()!==month?'other-month':'',key===today?'today':'',key===agendaSelectedDate?'selected':''].filter(Boolean).join(' ');
+      return '<button type="button" class="'+classes+'" data-agenda-date="'+key+'"><span class="agenda-day-number">'+date.getDate()+'</span>'+chips+more+'</button>';
+    }).join('');
+  }
   const selected=$('#agendaDayLabel');if(selected)selected.textContent=appointmentDateLabel(selectedDate,{weekday:'long',day:'numeric',month:'long'});
   const dayList=$('#agendaDayEvents'),dayCount=$('#agendaDayCount');
   const daily=visible.filter(a=>localDateKey(a.start_at)===agendaSelectedDate).sort((a,b)=>new Date(a.start_at)-new Date(b.start_at));
