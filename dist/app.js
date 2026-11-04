@@ -6,7 +6,7 @@ const $$ = (s, root=document) => [...root.querySelectorAll(s)];
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = value => Number(value || 0).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
 const categoryFor = device => /aire acondicionado|aerotermia|bomba de calor|acs|caldera|calentador|termo/i.test(String(device||'')) ? 'Clima' : (device ? 'Gama blanca' : null);
-let user=null, isSuperAdmin=false, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, realtimeCompanyId=null, membershipLoadPromise=null, noticeSource='landing', fieldScope='phone', noticeView='table', relatedNoticeMatch=null, selectedHistoryKey=null;
+let user=null, isSuperAdmin=false, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, realtimeCompanyId=null, membershipLoadPromise=null, membershipLoadStage='inicio', noticeSource='landing', fieldScope='phone', noticeView='table', relatedNoticeMatch=null, selectedHistoryKey=null;
 let landingRoutes={}, notificationChannels=[], formDestinations={}, globalFormRoutes=[];
 let landingListCollapsed=localStorage.getItem('crm-landings-list-collapsed')==='true';
 let fieldEditorRows=[];
@@ -135,14 +135,17 @@ function mountSignOut() {
   if(!$('#signOut')) { const b=document.createElement('button');b.id='signOut';b.className='signout-btn';b.textContent='Salir';$('.top-actions').append(b);b.addEventListener('click',async()=>{await db.auth.signOut();location.reload();}); }
 }
 async function loadMembershipsOnce() {
+  membershipLoadStage='comprobando el perfil';
   const {data:globalRole,error:globalRoleError}=await db.rpc('is_super_admin');
   if(globalRoleError)throw globalRoleError;
   isSuperAdmin=globalRole===true;applyAccessPermissions();
+  membershipLoadStage='cargando permisos de usuario';
   const {data,error}=await db.from('company_members').select('company_id,user_id,email,role').eq('user_id',user.id);
   if(error)throw error; members=Array.isArray(data)?data:[];
   applyAccessPermissions();
   const ids=[...new Set(members.map(m=>m.company_id))];
   if(!isSuperAdmin&&!ids.length){showOnboarding();return;}
+  membershipLoadStage='cargando empresas';
   const companyQuery=db.from('companies').select('*').order('created_at');
   const {data:rows,error:companyError}=isSuperAdmin?await companyQuery:await companyQuery.in('id',ids);
   if(companyError)throw companyError;
@@ -152,15 +155,26 @@ async function loadMembershipsOnce() {
     if(!isSuperAdmin){showOnboarding();return;}
     $('#authScreen')?.remove();mountSignOut();renderCompanyPicker();renderCompanyPage();showPage('empresas');return;
   }
+  membershipLoadStage='preparando la empresa seleccionada';
   currentCompany=companies.find(c=>c.id===currentCompany?.id)||companies[0];
   $('#authScreen')?.remove();
+  membershipLoadStage='inicializando la empresa';
   mountSignOut(); renderCompanyPicker(); renderCompanyPage(); renderMembers(); renderIntegrations(); renderSettings(); await loadCompanyData();
+  membershipLoadStage='carga completada';
 }
 async function loadMemberships() {
   if(membershipLoadPromise)return membershipLoadPromise;
+  setConnectionError('');membershipLoadStage='iniciando';
   const pending=loadMembershipsOnce();
   membershipLoadPromise=pending;
   try{return await pending;}finally{if(membershipLoadPromise===pending)membershipLoadPromise=null;}
+}
+function showMembershipLoadError(error){
+  const frame=String(error?.stack||'').split('\n').slice(1,2).join('').trim();
+  const message='No se pudo cargar tu empresa ('+membershipLoadStage+'): '+errorText(error);
+  setConnectionError(message);
+  const box=$('#connectionError');if(box)box.title=frame;
+  return message;
 }
 function showOnboarding() {
   localStorage.removeItem('crm-service-first-company');
@@ -1145,5 +1159,5 @@ async function exportCsv(report=false) {
   const csv=[columns,...rows.map(n=>[formatDate(n.received_at),statusLabel(n.status),n.customer_name,n.phone,n.email||'',landingName(n.landing_id),n.device||'',n.category||'',n.locality||'',n.postal_code||'',n.brand||'',n.issue||'',n.status==='Sale'?n.unit_price:'',...fields.filter(f=>f.visible_in_table).map(f=>n.custom_fields?.[f.field_key]??n[f.field_key]??'')])].map(r=>r.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(',')).join('\r\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));a.download='avisos-'+new Date().toISOString().slice(0,10)+'.csv';a.click();URL.revokeObjectURL(a.href);
 }
-document.addEventListener('DOMContentLoaded',()=>{wireUI();openAuth();if(!db)return;db.auth.getSession().then(({data,error})=>{if(error){$('#authError').textContent=errorText(error);return;}if(data.session){user=data.session.user;loadMemberships().catch(e=>{const message='No se pudo cargar tu empresa: '+errorText(e);setConnectionError(message);if($('#authError'))$('#authError').textContent=message;});}});db.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_IN'&&session){user=session.user;setTimeout(()=>loadMemberships().catch(e=>{const message='No se pudo cargar tu empresa: '+errorText(e);setConnectionError(message);if($('#authError'))$('#authError').textContent=message;openAuth();}),0);}if(event==='SIGNED_OUT'){user=null;location.reload();}});});
+document.addEventListener('DOMContentLoaded',()=>{wireUI();openAuth();if(!db)return;db.auth.getSession().then(({data,error})=>{if(error){$('#authError').textContent=errorText(error);return;}if(data.session){user=data.session.user;loadMemberships().catch(e=>{const message=showMembershipLoadError(e);if($('#authError'))$('#authError').textContent=message;});}});db.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_IN'&&session){user=session.user;setTimeout(()=>loadMemberships().catch(e=>{const message=showMembershipLoadError(e);if($('#authError'))$('#authError').textContent=message;openAuth();}),0);}if(event==='SIGNED_OUT'){user=null;location.reload();}});});
 
