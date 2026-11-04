@@ -998,7 +998,7 @@ function updateRecordFormMode() {
 function updateRecordSubmitLabel() {
   const type=$('#fRecordType')?.value||'aviso',status=$('#fStatus')?.value,submit=$('#saveNotice'),agendaSubmit=$('#saveAndSchedule');
   if(submit)submit.textContent=type==='aviso'?'Guardar aviso':status==='Sale'?(type==='anulacion'?'Enviar anulación':'Enviar reclamación'):'Registrar cliente equivocado';
-  if(agendaSubmit){agendaSubmit.hidden=noticeSource!=='phone'||type!=='aviso';agendaSubmit.disabled=status!=='Sale';agendaSubmit.title=status==='Sale'?'Guardar el aviso y abrir la agenda':'Para agendar, marca primero el aviso como sacado';}
+  if(agendaSubmit){agendaSubmit.hidden=noticeSource!=='phone'||type!=='aviso'||status!=='Sale';agendaSubmit.disabled=agendaSubmit.hidden;agendaSubmit.title='Guardar el aviso y abrir la agenda';}
 }
 function normalizePhoneForMatch(value) {
   let digits=String(value||'').replace(/\D/g,'');
