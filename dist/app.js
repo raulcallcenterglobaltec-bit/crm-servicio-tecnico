@@ -802,6 +802,28 @@ async function editLandingChannels(landingId) {
   toast('Canales guardados para '+landing.name+'.','Configuración actualizada');
   await renderIntegrations();
 }
+async function uploadLandingLogo(landingId,file,input) {
+  const landing=landings.find(l=>l.id===landingId);if(!file||!landing)return;
+  if(file.size>2*1024*1024){toast('El logo no puede superar 2 MB.','Archivo demasiado grande');if(input)input.value='';return;}
+  const extensions={'image/png':'png','image/jpeg':'jpg','image/webp':'webp','image/svg+xml':'svg'};
+  const ext=extensions[file.type];if(!ext){toast('Usa un logo PNG, JPG, WebP o SVG.','Formato no compatible');if(input)input.value='';return;}
+  const button=$(`[data-upload-landing-logo="${CSS.escape(landingId)}"]`,$('#landingIntegrations'));if(button)button.disabled=true;
+  try {
+    const path=`${currentCompany.id}/${landing.id}/logo-${Date.now()}.${ext}`;
+    const {error:uploadError}=await db.storage.from('company-logos').upload(path,file,{upsert:false,contentType:file.type});
+    if(uploadError)throw uploadError;
+    const {data:publicData}=db.storage.from('company-logos').getPublicUrl(path);
+    const {error:saveError}=await db.from('landings').update({logo_path:publicData.publicUrl}).eq('id',landing.id).select('id').single();
+    if(saveError)throw saveError;
+    landing.logo_path=publicData.publicUrl;
+    toast('Logo guardado para '+landing.name+'.','Logo actualizado');
+    await renderIntegrations();
+  } catch(error) {
+    toast(errorText(error),'No se pudo subir el logo');
+  } finally {
+    if(button)button.disabled=false;if(input)input.value='';
+  }
+}
 async function renderIntegrations() {
   if(!isSuperAdmin)return;
   const section=$('#page-integraciones');if(!section)return;
@@ -813,7 +835,9 @@ async function renderIntegrations() {
   await renderNotificationRoutes();
   const host=$('#landingIntegrations');
   const channelNames={telegram:'Telegram',whatsapp:'WhatsApp',email:'Correo'};
-  host.innerHTML=landings.map(l=>{const selected=Object.prototype.hasOwnProperty.call(landingRoutes,l.id)?landingRoutes[l.id]:null;const routeLabel=selected===null?'Usa destinos generales':selected.length?selected.map(k=>channelNames[k]||k).join(' · '):'Sin avisos automáticos';return `<div class="placeholder-tile"><strong>${esc(l.name)}${l.is_active?'':' · Inactiva'}</strong><small>${esc(l.url||'Sin URL guardada')}</small><small class="landing-channel-summary">Canales: ${esc(routeLabel)}</small><div class="button-row"><button class="outline-btn" data-code="${l.id}">Ver conexión</button><button class="outline-btn" data-landing-routes="${l.id}">Canales de aviso</button><button class="mini-delete" data-delete-landing="${l.id}" aria-label="Desactivar landing">×</button></div></div>`}).join('')||'<div class="empty">Todavía no hay landings conectadas.</div>';
+  host.innerHTML=landings.map(l=>{const selected=Object.prototype.hasOwnProperty.call(landingRoutes,l.id)?landingRoutes[l.id]:null;const routeLabel=selected===null?'Usa destinos generales':selected.length?selected.map(k=>channelNames[k]||k).join(' · '):'Sin avisos automáticos';const logo=l.logo_path?`<img src="${esc(l.logo_path)}" alt="Logo de ${esc(l.name)}" style="max-width:150px;max-height:58px;object-fit:contain;display:block;margin:8px 0">`:'<small>Esta landing no tiene logo propio</small>';return `<div class="placeholder-tile"><strong>${esc(l.name)}${l.is_active?'':' · Inactiva'}</strong><small>${esc(l.url||'Sin URL guardada')}</small><div>${logo}</div><small class="landing-channel-summary">Canales: ${esc(routeLabel)}</small><div class="button-row"><button class="outline-btn" data-code="${l.id}">Ver conexión</button><button class="outline-btn" data-landing-routes="${l.id}">Canales de aviso</button><button class="outline-btn" data-upload-landing-logo="${l.id}">${l.logo_path?'Cambiar logo':'Subir logo propio'}</button><input type="file" data-landing-logo-file="${l.id}" accept="image/png,image/jpeg,image/webp,image/svg+xml" aria-label="Seleccionar logo de ${esc(l.name)}" style="display:none"><button class="mini-delete" data-delete-landing="${l.id}" aria-label="Desactivar landing">×</button></div></div>`}).join('')||'<div class="empty">Todavía no hay landings conectadas.</div>';
+  $$('[data-upload-landing-logo]',host).forEach(button=>button.onclick=()=>{const input=$(`[data-landing-logo-file="${CSS.escape(button.dataset.uploadLandingLogo)}"]`,host);input?.click();});
+  $$('[data-landing-logo-file]',host).forEach(input=>input.onchange=()=>uploadLandingLogo(input.dataset.landingLogoFile,input.files?.[0],input));
   $$('[data-code]',host).forEach(b=>b.onclick=()=>showLandingCode(landings.find(l=>l.id===b.dataset.code)));
   $$('[data-landing-routes]',host).forEach(b=>b.onclick=()=>editLandingChannels(b.dataset.landingRoutes));
   $$('[data-delete-landing]',host).forEach(b=>b.onclick=async()=>{if(!await confirmDialog('¿Desactivar esta landing? Sus avisos y tarifas históricas se conservarán.'))return;const {error}=await db.from('landings').update({is_active:false}).eq('id',b.dataset.deleteLanding);if(error)toast(errorText(error),'No se pudo desactivar');else await loadCompanyData();});
