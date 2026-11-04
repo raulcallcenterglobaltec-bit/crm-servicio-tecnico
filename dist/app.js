@@ -403,7 +403,7 @@ function renderKanban(rows) {
     column.addEventListener('dragleave',event=>{if(!column.contains(event.relatedTarget))column.classList.remove('drag-over');});
     column.addEventListener('drop',async event=>{event.preventDefault();column.classList.remove('drag-over');const id=event.dataTransfer.getData('text/plain');if(id)await handleNoticeStatusChange(id,column.dataset.dropStatus,null);});
   });
-  $('[data-card-status]',board).forEach(select=>select.addEventListener('change',event=>handleNoticeStatusChange(event.target.dataset.cardStatus,event.target.value,event.target)));
+  $$('[data-card-status]',board).forEach(select=>select.addEventListener('change',event=>handleNoticeStatusChange(event.target.dataset.cardStatus,event.target.value,event.target)));
   $$('[data-open-card]',board).forEach(button=>button.addEventListener('click',()=>showDetails(button.dataset.openCard)));
 }
 function renderRows() {
@@ -441,10 +441,10 @@ function renderRows() {
   const max=Math.max(1,...days.flat());
   $$('.bar-group').forEach((g,i)=>$$('.bar',g).forEach((b,j)=>b.style.height=`${days[i]?.[j]/max*100||0}%`));
   updateLandingBadge();
-  $('[data-status-id]',body).forEach(sel=>sel.addEventListener('change',e=>handleNoticeStatusChange(e.target.dataset.statusId,e.target.value,e.target)));
-  $('[data-open-id]',body).forEach(b=>b.addEventListener('click',()=>showDetails(b.dataset.openId)));
-  $('[data-edit-id]',body).forEach(b=>b.addEventListener('click',()=>editNotice(b.dataset.editId)));
-  $('[data-delete-id]',body).forEach(b=>b.addEventListener('click',()=>deleteNotice(b.dataset.deleteId)));
+  $$('[data-status-id]',body).forEach(sel=>sel.addEventListener('change',e=>handleNoticeStatusChange(e.target.dataset.statusId,e.target.value,e.target)));
+  $$('[data-open-id]',body).forEach(b=>b.addEventListener('click',()=>showDetails(b.dataset.openId)));
+  $$('[data-edit-id]',body).forEach(b=>b.addEventListener('click',()=>editNotice(b.dataset.editId)));
+  $$('[data-delete-id]',body).forEach(b=>b.addEventListener('click',()=>deleteNotice(b.dataset.deleteId)));
   renderReport();
 }
 function renderComplaints() {
