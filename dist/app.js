@@ -889,7 +889,7 @@ function fieldsForPhone() { return fields.filter(f=>f.channel==='phone'&&!f.land
 function renderExtraFields() {
   syncDefaultFields();
   const host=$('#extraNoticeFields');if(!host)return;
-  $('[data-custom-key]').forEach(node=>node.remove());
+  $$('[data-custom-key]').forEach(node=>node.remove());
   host.innerHTML=fieldsForPhone().filter(f=>f.visible_in_form&&!['customer_name','phone','locality','postal_code','device','brand','issue'].includes(f.field_key)).map(f=>{
     const inputType={text:'text',phone:'tel',email:'email',number:'number',date:'date',select:'select',textarea:'textarea',checkbox:'checkbox'}[f.field_type]||'text';
     let field=inputType==='select'?'<select '+(f.required?'required':'')+'>'+['',...(f.options||[])].map(v=>`<option>${esc(v)}</option>`).join('')+'</select>':inputType==='textarea'?'<textarea '+(f.required?'required':'')+'></textarea>':`<input type="${inputType}" ${f.required?'required':''} ${inputType==='checkbox'?'value="true"':''}/>`;
@@ -1604,11 +1604,11 @@ function wireUI() {
   ['reportWeekday','reportLanding','reportStatus'].forEach(id=>$('#'+id).addEventListener('change',renderReport));
   $$('[data-notice-view]').forEach(button=>button.addEventListener('click',()=>setNoticeView(button.dataset.noticeView)));
   $('#cardFieldsToggle').addEventListener('click',()=>{$('#cardFieldPanel').hidden=!$('#cardFieldPanel').hidden;});
-  $('#newNotice').addEventListener('click',()=>openPhoneNotice('aviso'));
+  $('#newNotice').addEventListener('click',event=>{event.preventDefault();openPhoneNotice('aviso');});
   $('#newComplaint').addEventListener('click',()=>openPhoneNotice('reclamacion'));
   $('#agendaPrev').addEventListener('click',()=>shiftAgendaPeriod(-1));
   $('#agendaNext').addEventListener('click',()=>shiftAgendaPeriod(1));
-  $('[data-agenda-view]').forEach(button=>button.addEventListener('click',()=>{agendaView=button.dataset.agendaView;renderAgenda();}));
+  $$('[data-agenda-view]').forEach(button=>button.addEventListener('click',()=>{agendaView=button.dataset.agendaView;renderAgenda();}));
   $('#agendaToday').addEventListener('click',()=>{agendaSelectedDate=localDateKey(new Date());agendaMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1);renderAgenda();});
   $('#newAppointment').addEventListener('click',()=>openAppointmentDialog());
 
