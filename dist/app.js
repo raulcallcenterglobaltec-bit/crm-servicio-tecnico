@@ -1324,7 +1324,7 @@ function appointmentAddressFromNotice(notice) {
 }
 function agendaVisibleAppointments() {
   const eligibleIds=new Set(agendaEligibleNotices().map(n=>n.id));
-  return appointments.filter(a=>a.notice_id&&eligibleIds.has(a.notice_id));
+  return appointments.filter(a=>a.notice_id?eligibleIds.has(a.notice_id):true);
 }
 function renderAgenda() {
   const grid=$('#agendaCalendarGrid');if(!grid)return;
@@ -1402,35 +1402,46 @@ function shiftAgendaPeriod(delta) {
   agendaSelectedDate=localDateKey(date);agendaMonth=new Date(date.getFullYear(),date.getMonth(),1);renderAgenda();
 }
 async function openAppointmentDialog(existing=null,overrides={}) {
-  const eligible=agendaEligibleNotices();
+  const eligible=agendaEligibleNotices(),source=existing||{};
+  const isFree=!!(existing&&!existing.notice_id)||overrides.type==='free';
   const requestedId=existing?.notice_id||overrides.notice_id||'';
-  if(!eligible.length){toast('Para agendar, primero debe existir un aviso marcado como sacado.','No hay avisos sacados');return;}
-  if(existing&&!eligible.some(n=>n.id===existing.notice_id)){toast('Solo se pueden agendar clientes con un aviso marcado como sacado.','Aviso no disponible');return;}
-  const source=existing||{};
-  const answer=await formDialog({
-    title:existing?'Editar cita':'Agendar cita',
-    description:'Elige un aviso sacado. El cliente y su teléfono se completan desde ese aviso.',
-    fields:[
+  if(!isFree&&!eligible.length){toast('Para agendar con un cliente, primero debe existir un aviso marcado como sacado. También puedes crear una cita libre.','No hay avisos sacados');return;}
+  if(!isFree&&existing&&!eligible.some(n=>n.id===existing.notice_id)){toast('Solo se pueden agendar clientes con un aviso marcado como sacado.','Aviso no disponible');return;}
+  const startDefault=overrides.start_at?new Date(overrides.start_at):source.start_at||defaultAppointmentStart();
+  const freeType=source.customer_name==='Asuntos personales'?'Asuntos personales':'Cita libre';
+  const appointmentFields=isFree?[
+      {key:'appointment_type',label:'Tipo',type:'select',value:freeType,options:[{value:'Cita libre',label:'Cita libre'},{value:'Asuntos personales',label:'Asuntos personales'}]},
+      {key:'start_at',label:'Fecha y hora',type:'datetime-local',value:localDateTimeValue(startDefault),required:true},
+      {key:'duration_minutes',label:'Duración en minutos',type:'number',value:source.duration_minutes||60,required:true},
+      {key:'address',label:'Lugar o dirección (opcional)',type:'text',value:source.address||''},
+      {key:'notes',label:'Notas',type:'textarea',value:source.notes||''},
+      {key:'status',label:'Estado',type:'select',value:overrides.status||((source.status==='cancelled')?'scheduled':source.status||'scheduled'),options:[{value:'scheduled',label:'Programada'},{value:'completed',label:'Realizada'}]}
+    ]:[
       {key:'notice_id',label:'Buscar por nombre, teléfono o dirección',type:'search-select',value:requestedId,required:true,placeholder:'Escribe el nombre, teléfono o dirección',options:eligible.map(n=>({value:n.id,label:agendaNoticeLabel(n)}))},
-      {key:'start_at',label:'Fecha y hora',type:'datetime-local',value:localDateTimeValue(source.start_at||defaultAppointmentStart()),required:true},
+      {key:'start_at',label:'Fecha y hora',type:'datetime-local',value:localDateTimeValue(startDefault),required:true},
       {key:'duration_minutes',label:'Duración en minutos',type:'number',value:source.duration_minutes||60,required:true},
       {key:'notes',label:'Notas para el técnico',type:'textarea',value:source.notes||''},
       {key:'status',label:'Estado',type:'select',value:overrides.status||((source.status==='cancelled')?'scheduled':source.status||'scheduled'),options:[{value:'scheduled',label:'Programada'},{value:'completed',label:'Realizada'}]}
-    ]
+    ];
+  const answer=await formDialog({
+    title:existing?'Editar cita':isFree?'Cita libre o asuntos personales':'Agendar cita',
+    description:isFree?'Añade un hueco sin asociarlo a un cliente o aviso.':'Elige un aviso sacado. El cliente y su teléfono se completan desde ese aviso.',
+    fields:appointmentFields,
+    confirmText:'Guardar cita'
   });
   if(!answer)return;
-  const selectedNotice=eligible.find(n=>n.id===answer.notice_id);
-  if(!selectedNotice){toast('Selecciona un aviso marcado como sacado.','Aviso no disponible');return;}
+  const selectedNotice=isFree?null:eligible.find(n=>n.id===answer.notice_id);
+  if(!isFree&&!selectedNotice){toast('Selecciona un aviso marcado como sacado.','Aviso no disponible');return;}
   const start=new Date(answer.start_at);
   if(!Number.isFinite(start.getTime())){toast('Indica una fecha y hora válidas.','Fecha no válida');return;}
   const payload={
     company_id:currentCompany.id,
-    notice_id:selectedNotice.id,
-    customer_name:selectedNotice.customer_name||'Cliente',
-    phone:selectedNotice.phone||'',
+    notice_id:selectedNotice?.id||null,
+    customer_name:selectedNotice?(selectedNotice.customer_name||'Cliente'):answer.appointment_type,
+    phone:selectedNotice?.phone||'',
     start_at:start.toISOString(),
     duration_minutes:Math.max(15,Math.min(480,Number(answer.duration_minutes)||60)),
-    address:appointmentAddressFromNotice(selectedNotice)||null,
+    address:selectedNotice?appointmentAddressFromNotice(selectedNotice)||null:answer.address.trim()||null,
     notes:answer.notes.trim()||null,
     status:answer.status||'scheduled',
     updated_at:new Date().toISOString()
@@ -1535,7 +1546,7 @@ async function disconnectGoogleCalendar() {
 function calendarEventBody(appointment) {
   const end=new Date(new Date(appointment.start_at).getTime()+(Number(appointment.duration_minutes)||60)*60000);
   return {
-    summary:'Cita de reparación · '+appointment.customer_name,
+    summary:(appointment.notice_id?'Cita de reparación · ':'Agenda · ')+appointment.customer_name,
     location:appointment.address||'',
     description:['Cliente: '+appointment.customer_name,'Teléfono: '+appointment.phone,appointment.notes||''].filter(Boolean).join('\n'),
     start:{dateTime:new Date(appointment.start_at).toISOString(),timeZone:'Europe/Madrid'},
@@ -1630,6 +1641,7 @@ function wireUI() {
 
   $('#agendaToday').addEventListener('click',()=>{agendaSelectedDate=localDateKey(new Date());agendaMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1);renderAgenda();});
   $('#newAppointment').addEventListener('click',()=>openAppointmentDialog());
+  $('#newFreeAppointment').addEventListener('click',()=>openAppointmentDialog(null,{type:'free'}));
 
   $('#fRecordType').addEventListener('change',()=>{syncDefaultFields();renderExtraFields();updateRecordFormMode();});
   $('#fStatus').addEventListener('change',updateRecordSubmitLabel);
