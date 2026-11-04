@@ -350,9 +350,9 @@ function renderKanban(rows) {
   $$('.kanban-column',board).forEach(column=>{
     column.addEventListener('dragover',event=>{event.preventDefault();column.classList.add('drag-over');});
     column.addEventListener('dragleave',event=>{if(!column.contains(event.relatedTarget))column.classList.remove('drag-over');});
-    column.addEventListener('drop',async event=>{event.preventDefault();column.classList.remove('drag-over');const id=event.dataTransfer.getData('text/plain');if(id)await changeStatus(id,column.dataset.dropStatus);});
+    column.addEventListener('drop',async event=>{event.preventDefault();column.classList.remove('drag-over');const id=event.dataTransfer.getData('text/plain');if(id)await handleNoticeStatusChange(id,column.dataset.dropStatus,null);});
   });
-  $$('[data-card-status]',board).forEach(select=>select.addEventListener('change',event=>changeStatus(event.target.dataset.cardStatus,event.target.value)));
+  $('[data-card-status]',board).forEach(select=>select.addEventListener('change',event=>handleNoticeStatusChange(event.target.dataset.cardStatus,event.target.value,event.target)));
   $$('[data-open-card]',board).forEach(button=>button.addEventListener('click',()=>showDetails(button.dataset.openCard)));
 }
 function renderRows() {
@@ -373,7 +373,7 @@ function renderRows() {
       return `<td>${esc(v||'—')}</td>`;
     }).join('');
     const sourceLabel=n.created_by?'Teléfono':landingName(n.landing_id);
-    return `<tr>${cells}<td><span class="source">${esc(sourceLabel)}</span></td><td>${esc(formatDate(n.received_at))}</td><td><select class="status ${statusClass(n.status)}" data-status-id="${n.id}" aria-label="Cambiar estado" ${canManage?'':'disabled'}>${['Nuevo','Sale','No sale'].map(s=>`<option value="${esc(s)}" ${s===n.status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select></td><td>${n.status==='Sale'?money(getUnitPrice(n)):'—'}</td><td><button class="row-action" data-open-id="${n.id}" aria-label="Abrir aviso">···</button></td></tr>`;
+    return `<tr>${cells}<td><span class="source">${esc(sourceLabel)}</span></td><td>${esc(formatDate(n.received_at))}</td><td><select class="status ${statusClass(n.status)}" data-status-id="${n.id}" aria-label="Cambiar estado" ${canManage?'':'disabled'}>${['Nuevo','Sale','No sale'].map(s=>`<option value="${esc(s)}" ${s===n.status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select></td><td>${n.status==='Sale'?money(getUnitPrice(n)):'—'}</td><td><div class="notice-row-actions"><button class="row-action" data-open-id="${n.id}" aria-label="Ver aviso" title="Ver aviso">···</button>${isSuperAdmin?`<button class="row-action" data-edit-id="${n.id}" aria-label="Editar aviso" title="Editar aviso">✎</button><button class="row-action notice-delete" data-delete-id="${n.id}" aria-label="Eliminar aviso" title="Eliminar aviso">×</button>`:''}</div></td></tr>`;
   }).join('');
   $('#emptyState').hidden=rows.length>0;
   const sourceTotal=notices.filter(n=>n.notice_type==='aviso'&&(noticeSource==='phone'?!!n.created_by:!!n.landing_id)).length;
@@ -390,8 +390,10 @@ function renderRows() {
   const max=Math.max(1,...days.flat());
   $$('.bar-group').forEach((g,i)=>$$('.bar',g).forEach((b,j)=>b.style.height=`${days[i]?.[j]/max*100||0}%`));
   updateLandingBadge();
-  $$('[data-status-id]',body).forEach(sel=>sel.addEventListener('change',async e=>changeStatus(e.target.dataset.statusId,e.target.value)));
-  $$('[data-open-id]',body).forEach(b=>b.addEventListener('click',()=>showDetails(b.dataset.openId)));
+  $('[data-status-id]',body).forEach(sel=>sel.addEventListener('change',e=>handleNoticeStatusChange(e.target.dataset.statusId,e.target.value,e.target)));
+  $('[data-open-id]',body).forEach(b=>b.addEventListener('click',()=>showDetails(b.dataset.openId)));
+  $('[data-edit-id]',body).forEach(b=>b.addEventListener('click',()=>editNotice(b.dataset.editId)));
+  $('[data-delete-id]',body).forEach(b=>b.addEventListener('click',()=>deleteNotice(b.dataset.deleteId)));
   renderReport();
 }
 function renderComplaints() {
@@ -467,16 +469,83 @@ function renderClientHistoryDetail(availableGroups=clientHistoryGroups()) {
   host.innerHTML=`<article class="card history-summary"><h2>${esc(group.name)}</h2><p>${esc(group.phone||'Sin teléfono')} · Historial completo de esta empresa</p><div class="history-summary-counts"><span class="history-pill history-pill-notices">${counts}</span><span class="history-pill">${records.length} registros en total</span></div></article>${noticeCards||'<article class="card empty">Este cliente todavía no tiene avisos técnicos registrados.</article>'}${unlinked.length?`<article class="history-unlinked"><h3>Reclamaciones o anulaciones sin aviso vinculado (${unlinked.length})</h3><p style="margin:0 0 7px;color:#7d6b48;font-size:10px">Estos registros se buscaron por el teléfono, pero no se vinculó un aviso concreto al registrarlos.</p>${unlinked.sort((a,b)=>new Date(b.received_at)-new Date(a.received_at)).map(followupMarkup).join('')}</article>`:''}`;
   $$('[data-history-open]',host).forEach(button=>button.addEventListener('click',()=>showDetails(button.dataset.historyOpen)));
 }
-async function changeStatus(id,status) {
+async function changeStatus(id,status,managementReason=null) {
   if(!canManageCurrentNotices())return false;
   const n=notices.find(x=>x.id===id);if(!n)return false;
   const wasSale=n.status==='Sale';
   const tariff=tariffForNotice(n);
-  const patch={status,managed_at:status==='Nuevo'?null:new Date().toISOString(),unit_price:status==='Sale'?Number(tariff?.price||0):0};
+  const patch={status,managed_at:status==='Nuevo'?null:new Date().toISOString(),unit_price:status==='Sale'?Number(tariff?.price||0):0,management_reason:status==='No sale'?managementReason:null};
   const {data,error}=await db.from('notices').update(patch).eq('id',id).select().single();
   if(error){toast(errorText(error),'No se pudo guardar');renderRows();return false;}
   Object.assign(n,data);renderRows();renderComplaints();renderClientHistory();
   if(!wasSale&&status==='Sale'&&n.created_by&&!n.landing_id&&n.notice_type==='aviso')await sendNoticeToConfiguredIntegrations(n);
+  return true;
+}
+async function requestNoSaleReason(current='') {
+  while(true){
+    const values=await formDialog({title:'¿Por qué no ha salido?',description:'Indica el motivo para dejar constancia en el aviso.',fields:[{key:'reason',label:'Motivo',type:'textarea',value:current,required:true,placeholder:'Ej.: cliente no acepta el presupuesto'}],confirmText:'Guardar motivo'});
+    if(values===null)return null;
+    const reason=String(values.reason||'').trim();
+    if(reason)return reason;
+    toast('Escribe el motivo antes de continuar.','Falta el motivo');
+  }
+}
+async function handleNoticeStatusChange(id,status,select){
+  const notice=notices.find(item=>item.id===id);if(!notice)return;
+  let reason=null;
+  if(status==='No sale'){
+    reason=await requestNoSaleReason(notice.management_reason||'');
+    if(reason===null){if(select)select.value=notice.status||'Nuevo';else renderRows();return;}
+  }
+  const saved=await changeStatus(id,status,reason);
+  if(!saved){if(select)select.value=notice.status||'Nuevo';else renderRows();}
+}
+async function deleteNotice(id){
+  if(!isSuperAdmin)return false;
+  const notice=notices.find(item=>item.id===id);if(!notice)return false;
+  const name=notice.customer_name||'este aviso';
+  if(!await confirmDialog('Se eliminará definitivamente el aviso de '+name+'. Esta acción no se puede deshacer.'))return false;
+  const {data,error}=await db.from('notices').delete().eq('id',id).select('id');
+  if(error){toast(errorText(error),'No se pudo eliminar');return false;}
+  if(!data?.length){toast('No se encontró el aviso o tu sesión no tiene permiso.','No se pudo eliminar');return false;}
+  const index=notices.findIndex(item=>item.id===id);if(index>=0)notices.splice(index,1);
+  renderRows();renderComplaints();renderClientHistory();
+  toast('El aviso se ha eliminado definitivamente.','Aviso eliminado');
+  return true;
+}
+async function editNotice(id){
+  if(!isSuperAdmin)return false;
+  const notice=notices.find(item=>item.id===id);if(!notice)return false;
+  const base=[
+    {key:'customer_name',label:'Cliente',value:notice.customer_name||'',required:true},
+    {key:'phone',label:'Teléfono',type:'tel',value:notice.phone||'',required:true},
+    {key:'email',label:'Correo',type:'email',value:notice.email||''},
+    {key:'locality',label:'Localidad',value:notice.locality||''},
+    {key:'postal_code',label:'Código postal',value:notice.postal_code||''},
+    {key:'device',label:'Aparato',value:notice.device||''},
+    {key:'brand',label:'Marca',value:notice.brand||''},
+    {key:'issue',label:'Avería / detalle',type:'textarea',value:notice.issue||''},
+    {key:'management_reason',label:'Motivo de no sacado',type:'textarea',value:notice.management_reason||'',required:notice.status==='No sale'}
+  ];
+  const baseKeys=new Set(base.map(field=>field.key));
+  const definitions=(notice.created_by?fieldsForPhone():fieldsForLanding(notice.landing_id)).filter(field=>!baseKeys.has(field.field_key));
+  const definedKeys=new Set(definitions.map(field=>field.field_key));
+  const extra=[...definitions.map(field=>({key:field.field_key,label:field.label,value:notice.custom_fields?.[field.field_key]??notice[field.field_key]??'',type:({text:'text',phone:'tel',email:'email',number:'number',date:'date',select:'select',textarea:'textarea',checkbox:'checkbox'})[field.field_type]||'text',options:field.options||[]})),...Object.entries(notice.custom_fields||{}).filter(([key])=>!baseKeys.has(key)&&!definedKeys.has(key)).map(([key,value])=>({key,label:key,value,type:'text'}))];
+  const values=await formDialog({title:'Editar aviso',description:'Corrige o completa los datos recibidos.',fields:[...base,...extra],confirmText:'Guardar cambios'});
+  if(values===null)return false;
+  const patch={},custom={...(notice.custom_fields||{})};
+  for(const field of base){
+    const value=String(values[field.key]??'').trim();
+    patch[field.key]=value||null;
+    if(field.key!=='management_reason')custom[field.key]=value;
+  }
+  for(const field of extra)custom[field.key]=values[field.key]??'';
+  patch.management_reason=notice.status==='No sale'?String(values.management_reason||'').trim()||null:null;
+  patch.custom_fields=custom;
+  const {data,error}=await db.from('notices').update(patch).eq('id',id).select().single();
+  if(error){toast(errorText(error),'No se pudo guardar');return false;}
+  Object.assign(notice,data);renderRows();renderComplaints();renderClientHistory();
+  toast('Los datos del aviso se han actualizado.','Aviso actualizado');
   return true;
 }
 async function sendNoticeToConfiguredIntegrations(notice) {
@@ -494,12 +563,12 @@ function showDetails(id) {
   const sourceLabel=n.created_by?'Teléfono':landingName(n.landing_id);
   const typeLabel=n.notice_type==='anulacion'?'Anulación':n.notice_type==='reclamacion'?'Reclamación':'Aviso técnico';
   const resultLabel=n.notice_type==='aviso'?statusLabel(n.status):n.status==='Sale'?'Envío solicitado':n.status==='No sale'?'No es nuestra (cliente equivocado)':'Registro anterior';
-  infoDialog('Detalle del registro',`Tipo: ${typeLabel}\nCliente: ${n.customer_name}\nTeléfono: ${n.phone}\nCorreo: ${n.email||'—'}\nAparato: ${n.device||'—'}\nOrigen: ${sourceLabel}\nResultado: ${resultLabel}\nRecibido: ${formatDate(n.received_at)}\nLocalidad: ${n.locality||'—'}\nCódigo postal: ${n.postal_code||'—'}\nMarca: ${n.brand||'—'}\nDetalle: ${n.issue||'—'}\n${custom}`);
+  infoDialog('Detalle del registro',`Tipo: ${typeLabel}\nCliente: ${n.customer_name}\nTeléfono: ${n.phone}\nCorreo: ${n.email||'—'}\nAparato: ${n.device||'—'}\nOrigen: ${sourceLabel}\nResultado: ${resultLabel}\nRecibido: ${formatDate(n.received_at)}\nLocalidad: ${n.locality||'—'}\nCódigo postal: ${n.postal_code||'—'}\nMarca: ${n.brand||'—'}\nDetalle: ${n.issue||'—'}\nMotivo por el que no salió: ${n.status==='No sale'?(n.management_reason||'Motivo no indicado'):'—'}\n${custom}`);
 }
 function installPendingUi() {
   if(!$('#pendingUiStyles')) {
     const style=document.createElement('style');style.id='pendingUiStyles';
-    style.textContent='.metric-clickable{cursor:pointer;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}.metric-pending{background:#fff0e9!important;border-color:#ef9b81!important;box-shadow:inset 4px 0 0 #e44820,0 5px 16px rgba(228,72,32,.09)!important}.metric-clickable:hover{transform:translateY(-2px);border-color:#f3c369;box-shadow:0 10px 26px rgba(28,42,69,.12)}.metric-clickable:focus-visible{outline:3px solid rgba(229,44,13,.35);outline-offset:3px}.pending-modal{width:min(760px,calc(100vw - 28px));max-height:calc(100vh - 36px);overflow:auto}.pending-modal .modal-head{align-items:flex-start}.pending-modal .modal-head p{margin:5px 0 0;color:#7d8798;font-size:12px}.pending-list{display:grid;gap:9px;margin:14px 0}.pending-item{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;padding:13px 15px;background:#fff;border:1px solid #e5e9f1;border-radius:11px;color:#17243a;cursor:pointer;transition:border-color .15s,background .15s,transform .15s}.pending-item:hover,.pending-item:focus-visible{border-color:#e44820;background:#fffaf8;transform:translateY(-1px);outline:none}.pending-item-main{display:grid;gap:4px;min-width:0}.pending-item-main strong{font-size:13px}.pending-item-main span{font-size:12px;color:#4e5d73}.pending-item-main small{font-size:10px;color:#8490a2}.pending-item-action{display:flex;align-items:center;gap:8px;color:#df2c0b;font-size:12px;font-weight:700;white-space:nowrap}.pending-item-action b{font-size:20px}.pending-hint{margin:12px 0 0;color:#7d8798;font-size:11px}.pending-empty{padding:32px 12px;display:grid;gap:7px;text-align:center;color:#7d8798;font-size:12px}.pending-empty strong{color:#18243a;font-size:16px}.pending-back{border:0;background:none;color:#df2c0b;font-family:inherit;font-size:12px;font-weight:600;padding:0;margin:0 0 14px;cursor:pointer}.pending-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.pending-detail-item{min-width:0;border:1px solid #e7eaf0;border-radius:9px;padding:10px 11px;display:grid;gap:5px;background:#fbfcfe}.pending-detail-item span{font-size:10px;color:#8490a2;text-transform:uppercase;letter-spacing:.04em}.pending-detail-item strong{font-size:13px;color:#202d43;white-space:pre-wrap;overflow-wrap:anywhere}.pending-detail-item.wide{grid-column:1/-1}.pending-status-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:18px;flex-wrap:wrap}.pending-status-actions button:disabled{opacity:.55;cursor:not-allowed}@media(max-width:560px){.pending-detail-grid{grid-template-columns:1fr}.pending-item{align-items:flex-start;flex-direction:column}.pending-item-action{align-self:flex-end}.pending-status-actions button{flex:1}}';
+    style.textContent='.notice-row-actions{display:flex;align-items:center;gap:5px;white-space:nowrap}.notice-row-actions .row-action{min-width:29px}.notice-row-actions .notice-delete{color:#df2c0b;border-color:#f2c7bd;background:#fff7f5}.notice-row-actions .notice-delete:hover{background:#ffebe6;border-color:#e44820}.pending-status-actions .pending-delete{color:#c6281f;border-color:#f1c0ba;background:#fff7f5}.metric-clickable{cursor:pointer;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}.metric-pending{background:#fff0e9!important;border-color:#ef9b81!important;box-shadow:inset 4px 0 0 #e44820,0 5px 16px rgba(228,72,32,.09)!important}.metric-clickable:hover{transform:translateY(-2px);border-color:#f3c369;box-shadow:0 10px 26px rgba(28,42,69,.12)}.metric-clickable:focus-visible{outline:3px solid rgba(229,44,13,.35);outline-offset:3px}.pending-modal{width:min(760px,calc(100vw - 28px));max-height:calc(100vh - 36px);overflow:auto}.pending-modal .modal-head{align-items:flex-start}.pending-modal .modal-head p{margin:5px 0 0;color:#7d8798;font-size:12px}.pending-list{display:grid;gap:9px;margin:14px 0}.pending-item{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;padding:13px 15px;background:#fff;border:1px solid #e5e9f1;border-radius:11px;color:#17243a;cursor:pointer;transition:border-color .15s,background .15s,transform .15s}.pending-item:hover,.pending-item:focus-visible{border-color:#e44820;background:#fffaf8;transform:translateY(-1px);outline:none}.pending-item-main{display:grid;gap:4px;min-width:0}.pending-item-main strong{font-size:13px}.pending-item-main span{font-size:12px;color:#4e5d73}.pending-item-main small{font-size:10px;color:#8490a2}.pending-item-action{display:flex;align-items:center;gap:8px;color:#df2c0b;font-size:12px;font-weight:700;white-space:nowrap}.pending-item-action b{font-size:20px}.pending-hint{margin:12px 0 0;color:#7d8798;font-size:11px}.pending-empty{padding:32px 12px;display:grid;gap:7px;text-align:center;color:#7d8798;font-size:12px}.pending-empty strong{color:#18243a;font-size:16px}.pending-back{border:0;background:none;color:#df2c0b;font-family:inherit;font-size:12px;font-weight:600;padding:0;margin:0 0 14px;cursor:pointer}.pending-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.pending-detail-item{min-width:0;border:1px solid #e7eaf0;border-radius:9px;padding:10px 11px;display:grid;gap:5px;background:#fbfcfe}.pending-detail-item span{font-size:10px;color:#8490a2;text-transform:uppercase;letter-spacing:.04em}.pending-detail-item strong{font-size:13px;color:#202d43;white-space:pre-wrap;overflow-wrap:anywhere}.pending-detail-item.wide{grid-column:1/-1}.pending-status-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:18px;flex-wrap:wrap}.pending-status-actions button:disabled{opacity:.55;cursor:not-allowed}@media(max-width:560px){.pending-detail-grid{grid-template-columns:1fr}.pending-item{align-items:flex-start;flex-direction:column}.pending-item-action{align-self:flex-end}.pending-status-actions button{flex:1}}';
     document.head.append(style);
   }
   const metric=$('#mNew')?.closest('.metric');
@@ -538,11 +607,15 @@ function openPendingNotices() {
     const open=e.target.closest('[data-pending-open]');
     if(open){renderPendingNoticeDetail(backdrop,open.getAttribute('data-pending-open'));return;}
     if(e.target.closest('[data-pending-back]')){renderPendingNoticeList(backdrop);return;}
+    const id=backdrop.dataset.pendingNoticeId;
+    if(e.target.closest('[data-pending-edit]')){await editNotice(id);renderPendingNoticeDetail(backdrop,id);return;}
+    if(e.target.closest('[data-pending-delete]')){if(await deleteNotice(id))renderPendingNoticeList(backdrop);return;}
     const action=e.target.closest('[data-pending-status]');
     if(action){
-      const id=backdrop.dataset.pendingNoticeId,status=action.getAttribute('data-pending-status');
+      const status=action.getAttribute('data-pending-status');let reason=null;
+      if(status==='No sale'){reason=await requestNoSaleReason(notices.find(item=>item.id===id)?.management_reason||'');if(reason===null)return;}
       host.querySelectorAll('button').forEach(button=>button.disabled=true);action.textContent='Guardando…';
-      const saved=await changeStatus(id,status);
+      const saved=await changeStatus(id,status,reason);
       if(saved){toast(status==='Sale'?'Aviso marcado como sacado.':'Aviso marcado como no sacado.','Gestión actualizada');renderPendingNoticeList(backdrop);}
       else renderPendingNoticeDetail(backdrop,id);
     }
@@ -574,8 +647,9 @@ function renderPendingNoticeDetail(backdrop,id) {
     +pendingDetailRow('Correo',n.email,false)+pendingDetailRow('Origen',origin,false)
     +pendingDetailRow('Aparato',n.device,false)+pendingDetailRow('Localidad',n.locality,false)
     +pendingDetailRow('Código postal',n.postal_code,false)+pendingDetailRow('Marca',n.brand,false)
-    +pendingDetailRow('Recibido',formatDate(n.received_at),false)+pendingDetailRow('Avería',n.issue,true)+extras
-    +'</div><div class="pending-status-actions"><button type="button" class="outline-btn" data-pending-status="No sale" '+(canManage?'':'disabled')+'>Aviso no sacado</button><button type="button" class="primary-btn" data-pending-status="Sale" '+(canManage?'':'disabled')+'>Aviso sacado</button></div>'
+    +pendingDetailRow('Recibido',formatDate(n.received_at),false)+pendingDetailRow('Avería',n.issue,true)
+    +(n.status==='No sale'?pendingDetailRow('Motivo por el que no salió',n.management_reason||'Motivo no indicado',true):'')+extras
+    +'</div><div class="pending-status-actions">'+(isSuperAdmin?'<button type="button" class="outline-btn" data-pending-edit>Editar datos</button><button type="button" class="outline-btn pending-delete" data-pending-delete>Eliminar aviso</button>':'')+'<button type="button" class="outline-btn" data-pending-status="No sale" '+(canManage?'':'disabled')+'>Aviso no sacado</button><button type="button" class="primary-btn" data-pending-status="Sale" '+(canManage?'':'disabled')+'>Aviso sacado</button></div>'
     +(canManage?'':'<p class="pending-hint">Tu perfil puede consultar los datos, pero no cambiar el estado.</p>');
 }
 function setupDate(prefix) {
