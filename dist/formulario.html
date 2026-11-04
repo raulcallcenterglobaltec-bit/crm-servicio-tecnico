@@ -60,7 +60,7 @@
       document.getElementById('heading').textContent='Cuéntanos qué necesitas';
       document.getElementById('intro').textContent=landing.name?'Formulario de solicitud · '+landing.name:'Completa los datos para enviar tu solicitud.';
       const brand=document.getElementById('brand');
-      if(company.logo_path)brand.innerHTML='<img class="logo" src="'+esc(company.logo_path)+'" alt=""><span class="brand-name">'+esc(company.name||'')+'</span>';
+      const logoPath=landing.logo_path||company.logo_path;if(logoPath)brand.innerHTML='<img class="logo" src="'+esc(logoPath)+'" alt=""><span class="brand-name">'+esc(company.name||'')+'</span>'; 
       else brand.innerHTML='<span class="brand-name">'+esc(company.name||'')+'</span>';
       const fields=(payload.fields||[]).slice().sort((a,b)=>(a.position||0)-(b.position||0));
       if(!fields.length)throw new Error('Esta landing todavía no tiene campos visibles en el formulario.');
