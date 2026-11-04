@@ -7,6 +7,7 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;',
 const money = value => Number(value || 0).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
 const categoryFor = device => /aire acondicionado|aerotermia|bomba de calor|acs|caldera|calentador|termo/i.test(String(device||'')) ? 'Clima' : (device ? 'Gama blanca' : null);
 let user=null, isSuperAdmin=false, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, noticeSource='landing', fieldScope='phone', noticeView='table', relatedNoticeMatch=null, selectedHistoryKey=null;
+let landingRoutes={}, notificationChannels=[], formDestinations={}, globalFormRoutes=[];
 let fieldEditorRows=[];
 let authMode='login', selectedDate=new Date().toISOString().slice(0,10), showResendConfirmation=false;
 const defaultFields=[
@@ -785,6 +786,22 @@ function renderMembers() {
   $$('[data-remove-member]',section).forEach(b=>b.onclick=async()=>{if(!await confirmDialog('¿Retirar este usuario de la empresa?'))return;const {error}=await db.from('company_members').delete().eq('company_id',currentCompany.id).eq('user_id',b.dataset.removeMember);if(error)toast(errorText(error),'No se pudo retirar');else{members=members.filter(m=>m.user_id!==b.dataset.removeMember);renderMembers();}});
   const add=$('.page-head .primary-btn',section);if(add)add.onclick=async()=>{const answer=await formDialog({title:'Invitar usuario',description:'La persona solo tendrá acceso a esta empresa. Elige si podrá gestionar avisos o consultar la información.',fields:[{key:'email',label:'Correo electrónico',type:'email',required:true,autocomplete:'email'},{key:'role',label:'Permiso',type:'select',value:'gestor',options:[{value:'gestor',label:'Gestor: puede registrar y gestionar avisos'},{value:'consulta',label:'Consulta: solo lectura'}]}]});if(!answer)return;const {error}=await db.functions.invoke('invite-member',{body:{company_id:currentCompany.id,email:answer.email.trim(),role:answer.role}});toast(error?errorText(error):'Invitación enviada. El usuario recibirá un correo para acceder.',error?'No se pudo invitar':'Invitación enviada');if(!error)await loadCompanyData();};
 }
+async function editLandingChannels(landingId) {
+  const landing=landings.find(l=>l.id===landingId);if(!landing)return;
+  const available=notificationChannels.filter(kind=>{const target=formDestinations[kind];return Array.isArray(target)?target.length>0:!!String(target||'').trim();});
+  if(!available.length){toast('Configura primero un canal y su destino para los avisos de formulario.','No hay canales disponibles');return;}
+  const storedChannels=landingRoutes[landing.id];
+  const selected=Array.isArray(storedChannels)?storedChannels:globalFormRoutes;
+  const labels={telegram:'Telegram',whatsapp:'WhatsApp',email:'Correo electrónico'};
+  const answer=await formDialog({title:'Canales de aviso · '+landing.name,description:'Elige por qué canales recibir los avisos de esta landing. El destino se toma de la configuración de Integraciones.',fields:available.map(kind=>({key:kind,label:labels[kind]||kind,type:'checkbox',value:selected.includes(kind)})),confirmText:'Guardar canales'});
+  if(!answer)return;
+  const landing_channels=available.filter(kind=>answer[kind]);
+  const {error}=await db.functions.invoke('manage-integration',{body:{company_id:currentCompany.id,action:'save_landing_routes',landing_id:landing.id,landing_channels}});
+  if(error){toast(errorText(error),'No se pudieron guardar los canales');return;}
+  landingRoutes={...landingRoutes,[landing.id]:landing_channels};
+  toast('Canales guardados para '+landing.name+'.','Configuración actualizada');
+  await renderIntegrations();
+}
 async function renderIntegrations() {
   if(!isSuperAdmin)return;
   const section=$('#page-integraciones');if(!section)return;
@@ -795,9 +812,11 @@ async function renderIntegrations() {
   $$('[data-test-channel]',$('#providerCards')).forEach(b=>b.onclick=()=>testIntegration(b.dataset.testChannel));
   await renderNotificationRoutes();
   const host=$('#landingIntegrations');
-  host.innerHTML=landings.map(l=>`<div class="placeholder-tile"><strong>${esc(l.name)}${l.is_active?'':' · Inactiva'}</strong><small>${esc(l.url||'Sin URL guardada')}</small><div class="button-row"><button class="outline-btn" data-code="${l.id}">Ver conexión</button><button class="mini-delete" data-delete-landing="${l.id}" aria-label="Desactivar landing">×</button></div></div>`).join('')||'<div class="empty">Todavía no hay landings conectadas.</div>';
-  $$('[data-code]',host).forEach(b=>b.onclick=()=>showLandingCode(landings.find(l=>l.id===b.dataset.code)));
-  $$('[data-delete-landing]',host).forEach(b=>b.onclick=async()=>{if(!await confirmDialog('¿Desactivar esta landing? Sus avisos y tarifas históricas se conservarán.'))return;const {error}=await db.from('landings').update({is_active:false}).eq('id',b.dataset.deleteLanding);if(error)toast(errorText(error),'No se pudo desactivar');else await loadCompanyData();});
+  const channelNames={telegram:'Telegram',whatsapp:'WhatsApp',email:'Correo'};
+  host.innerHTML=landings.map(l=>{const selected=Object.prototype.hasOwnProperty.call(landingRoutes,l.id)?landingRoutes[l.id]:null;const routeLabel=selected===null?'Usa destinos generales':selected.length?selected.map(k=>channelNames[k]||k).join(' · '):'Sin avisos automáticos';return `<div class="placeholder-tile"><strong>${esc(l.name)}${l.is_active?'':' · Inactiva'}</strong><small>${esc(l.url||'Sin URL guardada')}</small><small class="landing-channel-summary">Canales: ${esc(routeLabel)}</small><div class="button-row"><button class="outline-btn" data-code="${l.id}">Ver conexión</button><button class="outline-btn" data-landing-routes="${l.id}">Canales de aviso</button><button class="mini-delete" data-delete-landing="${l.id}" aria-label="Desactivar landing">×</button></div></div>`}).join('')||'<div class="empty">Todavía no hay landings conectadas.</div>';
+  $('[data-code]',host).forEach(b=>b.onclick=()=>showLandingCode(landings.find(l=>l.id===b.dataset.code)));
+  $('[data-landing-routes]',host).forEach(b=>b.onclick=()=>editLandingChannels(b.dataset.landingRoutes));
+  $('[data-delete-landing]',host).forEach(b=>b.onclick=async()=>{if(!await confirmDialog('¿Desactivar esta landing? Sus avisos y tarifas históricas se conservarán.'))return;const {error}=await db.from('landings').update({is_active:false}).eq('id',b.dataset.deleteLanding);if(error)toast(errorText(error),'No se pudo desactivar');else await loadCompanyData();});
 }
 async function renderNotificationRoutes() {
   const host=$('#notificationRoutes');if(!host)return;
@@ -805,6 +824,7 @@ async function renderNotificationRoutes() {
   const {data,error}=await db.functions.invoke('manage-integration',{body:{company_id:currentCompany.id,action:'get_routes'}});
   if(error){host.innerHTML=`<div class="empty">No se pudieron cargar los destinos: ${esc(errorText(error))}</div>`;return;}
   const channels=data?.channels||[],routes=data?.routes||{form:[],phone:[],complaint:[]},blocked=data?.blocked||{form:[],phone:[],complaint:[]},destinations=data?.destinations||{};
+  landingRoutes=data?.landing_routes||{};notificationChannels=channels;globalFormRoutes=routes.form||[];formDestinations=destinations.form||{};
   const rows=[['form','Avisos recibidos por formulario web'],['phone','Avisos recibidos por teléfono («Aviso Sacado»)'],['complaint','Reclamaciones o anulaciones']];
   const channelMeta=[['telegram','Telegram','Grupo o chat'],['whatsapp','WhatsApp','Número con prefijo'],['email','Correo','Destinatarios separados por comas']];
   host.innerHTML=`<div class="route-table-scroll"><table class="route-table"><thead><tr><th>TIPO DE AVISO</th>${channelMeta.map(([,label])=>`<th>${label}</th>`).join('')}</tr></thead><tbody>${rows.map(([type,label])=>`<tr><td>${label}</td>${channelMeta.map(([channel,label,placeholder])=>{const unavailable=blocked[type]?.includes(channel);const target=destinations[type]?.[channel]||'';return `<td class="route-destination-cell"><label class="route-check"><input type="checkbox" aria-label="Enviar por ${channel}" data-route-type="${type}" data-route-channel="${channel}" ${routes[type]?.includes(channel)?'checked':''} ${channels.includes(channel)?'':'disabled'} ${unavailable?'title="Indica un destino para activar este canal"':''} /> Usar</label><input class="route-destination-input" type="text" placeholder="${placeholder}" aria-label="Destino ${label} para ${type}" data-route-destination-type="${type}" data-route-destination-channel="${channel}" value="${esc(Array.isArray(target)?target.join(', '):target)}" ${channels.includes(channel)?'':'disabled'} /></td>`;}).join('')}</tr>`).join('')}</tbody></table></div>`;
@@ -831,12 +851,28 @@ async function testIntegration(kind) {
   const {error}=await db.functions.invoke('notify-test',{body:{company_id:currentCompany.id,kind}});
   toast(error?errorText(error):'Mensaje de prueba enviado.',error?'No se pudo enviar':'Prueba enviada');
 }
-function showLandingCode(landing) {
+async function showLandingCode(landing) {
   if(!landing)return;
+  const hostedOrigin=window.location.origin;
+  const allowedOrigins=Array.isArray(landing.allowed_origins)?landing.allowed_origins:[];
+  if(!allowedOrigins.includes(hostedOrigin)){
+    const nextOrigins=[...allowedOrigins,hostedOrigin];
+    const {error}=await db.from('landings').update({allowed_origins:nextOrigins}).eq('id',landing.id);
+    if(error){toast(errorText(error),'No se pudo habilitar el formulario alojado');return;}
+    landing.allowed_origins=nextOrigins;
+  }
   const endpoint=CFG.url.replace(/\/$/,'')+'/functions/v1/service-form';
-  const code=`fetch('${endpoint}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({landing_key:'${landing.endpoint_key}',data:{customer_name:'Nombre',phone:'600000000',device:'Lavadora',issue:'Descripción de la avería'}})}).then(r=>r.json())`;
-  const backdrop=document.createElement('div');backdrop.className='modal-backdrop open';backdrop.innerHTML=`<div class="modal" style="max-width:640px"><div class="modal-head"><div><h2>Conectar ${esc(landing.name)}</h2><p>Endpoint y ejemplo de envío desde el formulario.</p></div><button class="close">×</button></div><p><strong>URL:</strong></p><div class="integration-code">${esc(endpoint)}</div><p><strong>Clave de landing:</strong></p><div class="integration-code">${esc(landing.endpoint_key)}</div><p><strong>Ejemplo JavaScript:</strong></p><div class="integration-code">${esc(code)}</div><div class="modal-actions"><button class="outline-btn" id="copyLandingCode">Copiar código</button><button class="primary-btn close-code">Cerrar</button></div></div>`;
-  document.body.append(backdrop);$('.close',backdrop).onclick=()=>backdrop.remove();$('.close-code',backdrop).onclick=()=>backdrop.remove();$('#copyLandingCode',backdrop).onclick=async()=>{await navigator.clipboard.writeText(code);toast('Código copiado.');};
+  const code=\`fetch('\${endpoint}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({landing_key:'\${landing.endpoint_key}',data:{customer_name:'Nombre',phone:'600000000',device:'Lavadora',issue:'Descripción de la avería'}})}).then(r=>r.json())\`;
+  const hostedUrl=new URL('formulario.html',document.baseURI);
+  hostedUrl.searchParams.set('key',landing.endpoint_key);
+  const hostedLink=hostedUrl.href;
+  const embedCode=\`<iframe src="\${hostedLink}" title="Formulario de solicitud" loading="lazy" style="width:100%;min-height:850px;border:0"></iframe>\`;
+  const backdrop=document.createElement('div');backdrop.className='modal-backdrop open';
+  backdrop.innerHTML=\`<div class="modal" style="max-width:720px;max-height:90vh;overflow:auto"><div class="modal-head"><div><h2>Conectar \${esc(landing.name)}</h2><p>Usa el formulario alojado o conecta el formulario de tu web con este endpoint.</p></div><button class="close" type="button" aria-label="Cerrar">×</button></div><p><strong>Formulario alojado · enlace directo</strong></p><div class="integration-code">\${esc(hostedLink)}</div><p><strong>Formulario incrustable · iframe</strong></p><div class="integration-code">\${esc(embedCode)}</div><p><strong>Endpoint para integrar un formulario propio</strong></p><div class="integration-code">\${esc(endpoint)}</div><p><strong>Clave de landing:</strong></p><div class="integration-code">\${esc(landing.endpoint_key)}</div><p><strong>Ejemplo JavaScript:</strong></p><div class="integration-code">\${esc(code)}</div><div class="modal-actions"><button class="outline-btn" id="copyHostedLink">Copiar enlace</button><button class="outline-btn" id="copyEmbedCode">Copiar iframe</button><button class="outline-btn" id="copyLandingCode">Copiar ejemplo</button><button class="primary-btn close-code" type="button">Cerrar</button></div></div>\`;
+  document.body.append(backdrop);$('.close',backdrop).onclick=()=>backdrop.remove();$('.close-code',backdrop).onclick=()=>backdrop.remove();
+  $('#copyHostedLink',backdrop).onclick=async()=>{await navigator.clipboard.writeText(hostedLink);toast('Enlace del formulario copiado.');};
+  $('#copyEmbedCode',backdrop).onclick=async()=>{await navigator.clipboard.writeText(embedCode);toast('Código para incrustar copiado.');};
+  $('#copyLandingCode',backdrop).onclick=async()=>{await navigator.clipboard.writeText(code);toast('Ejemplo JavaScript copiado.');};
 }
 
 function showPage(name) {
