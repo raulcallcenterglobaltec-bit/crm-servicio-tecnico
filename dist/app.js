@@ -260,7 +260,7 @@ async function loadCompanyData() {
     if(!fields.length){const seeds=['phone','landing'].flatMap(channel=>defaultFields.map(f=>({...f,channel,options:f.options||[],company_id:c})));const {data:createdFields,error}=await db.from('notice_fields').insert(seeds).select();if(error)throw error;fields=createdFields||[];}
     membershipLoadStage='conectando avisos en tiempo real';
     if(realtimeChannel&&realtimeCompanyId!==c){const oldChannel=realtimeChannel;realtimeChannel=null;realtimeCompanyId=null;try{await db.removeChannel(oldChannel);}catch(removeError){console.warn('No se pudo cerrar la suscripción anterior de avisos',removeError);}}
-    if(!realtimeChannel){realtimeCompanyId=c;realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();renderComplaints();renderClientHistory();}}).subscribe();}
+    if(!realtimeChannel){realtimeCompanyId=c;realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{const incoming=payload.new;if(incoming?.company_id===currentCompany?.id&&!notices.some(n=>n.id===incoming.id)){notices.unshift(incoming);renderRows();renderComplaints();renderClientHistory();}}).subscribe();}
     membershipLoadStage='limpiando banners';Array.from(document.querySelectorAll('.demo-banner')).forEach(el=>el.remove());setConnectionError('');
     membershipLoadStage='dibujando opciones de landing';renderLandingOptions();
     membershipLoadStage='dibujando tabla de avisos';renderRows();
@@ -559,7 +559,7 @@ async function deleteNotice(id){
   const {data,error}=await db.from('notices').delete().eq('id',id).select('id');
   if(error){toast(errorText(error),'No se pudo eliminar');return false;}
   if(!data?.length){toast('No se encontró el aviso o tu sesión no tiene permiso.','No se pudo eliminar');return false;}
-  const index=notices.findIndex(item=>item.id===id);if(index>=0)notices.splice(index,1);
+  notices=notices.filter(item=>item.id!==id);
   renderRows();renderComplaints();renderClientHistory();
   toast('El aviso se ha eliminado definitivamente.','Aviso eliminado');
   return true;
