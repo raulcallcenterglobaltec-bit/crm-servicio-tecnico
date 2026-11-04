@@ -31,6 +31,9 @@
 .kanban-column[data-drop-status="No sale"] .kanban-count{background:var(--red-soft);color:var(--red)}
 .kanban-list{display:grid;gap:9px;min-height:110px}
 .notice-card{padding:12px;background:#fff;border:1px solid var(--line);border-radius:9px;box-shadow:0 3px 10px #18253a0a;cursor:grab}
+.kanban-column[data-drop-status="Nuevo"] .notice-card{background:#fff8e8;border-color:#f0d9a2}
+.kanban-column[data-drop-status="Sale"] .notice-card{background:#edf8f0;border-color:#bfe2ca}
+.kanban-column[data-drop-status="No sale"] .notice-card{background:#fff0f0;border-color:#f1c5c5}
 .notice-card:active{cursor:grabbing}.notice-card.dragging{opacity:.45}
 .notice-card-head{display:flex;justify-content:space-between;gap:9px;align-items:flex-start}
 .notice-card-head strong{font-size:12px;color:#334056}.notice-card-head small{display:block;color:#8791a2;font-size:10px;margin-top:2px}
