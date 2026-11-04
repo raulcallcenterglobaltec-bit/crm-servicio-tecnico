@@ -32,6 +32,11 @@ function formDialog({title,description='',fields=[],confirmText='Guardar'}) {
       const label=esc(f.label),key=esc(f.key),value=esc(f.value??''),required=f.required?'required':'';
       let control;
       if(f.type==='select')control=`<select name="${key}" ${required}>${(f.options||[]).map(o=>{const v=typeof o==='string'?o:o.value,l=typeof o==='string'?o:o.label;return `<option value="${esc(v)}" ${String(v)===String(f.value??'')?'selected':''}>${esc(l)}</option>`;}).join('')}</select>`;
+      else if(f.type==='search-select'){
+        const options=(f.options||[]).map(o=>typeof o==='string'?{value:o,label:o}:o);
+        const selected=options.find(o=>String(o.value)===String(f.value??''));
+        control=`<div class="search-select-wrap" style="position:relative"><input type="search" name="${key}_search" data-search-select-input="${key}" value="${esc(selected?.label||'')}" placeholder="${esc(f.placeholder||'Busca por nombre, teléfono o dirección')}" autocomplete="off" ${required}/><input type="hidden" name="${key}" value="${value}"/><div data-search-select-results="${key}" hidden style="position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:5;max-height:190px;overflow:auto;border:1px solid var(--line);border-radius:9px;background:#fff;box-shadow:0 10px 24px #17213a20;padding:4px"></div></div>`;
+      }
       else if(f.type==='textarea')control=`<textarea name="${key}" rows="3" ${required} placeholder="${esc(f.placeholder||'')}">${value}</textarea>`;
       else if(f.type==='checkbox')control=`<input name="${key}" type="checkbox" style="width:16px;height:16px;padding:0;margin:0;flex:0 0 16px;accent-color:var(--accent)" ${f.value?'checked':''} ${required}/>`;
       else if(f.type==='file')control=`<input name="${key}" type="file" accept="${esc(f.accept||'')}" ${required}/>`;
@@ -42,8 +47,23 @@ function formDialog({title,description='',fields=[],confirmText='Guardar'}) {
     backdrop.innerHTML=`<form class="modal" style="max-height:90vh;overflow:auto" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>${esc(title)}</h2><p>${esc(description)}</p></div><button class="close" type="button" data-dialog-cancel aria-label="Cerrar">×</button></div>${controls}<div class="modal-actions"><button class="outline-btn" type="button" data-dialog-cancel>Cancelar</button><button class="primary-btn" type="submit">${esc(confirmText)}</button></div></form>`;
     const finish=value=>{backdrop.remove();resolve(value);};
     backdrop.addEventListener('click',e=>{const target=e.target;if(target===backdrop||(target instanceof Element&&target.closest('[data-dialog-cancel]'))){e.preventDefault();e.stopPropagation();finish(null);}});
-    $('form',backdrop).addEventListener('submit',e=>{e.preventDefault();const result={};for(const f of fields){const el=$('[name="'+CSS.escape(f.key)+'"]',backdrop);result[f.key]=f.type==='checkbox'?el.checked:f.type==='number'?Number(el.value):f.type==='file'?(el.files?.[0]||null):el.value;}finish(result);});
-    document.body.append(backdrop);$('[name]',backdrop)?.focus();
+    $('form',backdrop).addEventListener('submit',e=>{e.preventDefault();const result={};for(const f of fields){const el=$('[name="'+CSS.escape(f.key)+'"]',backdrop);if(f.type==='search-select'&&!el.value){const search=$('[data-search-select-input="'+CSS.escape(f.key)+'"]',backdrop);search.setCustomValidity('Selecciona un cliente de la lista.');search.reportValidity();search.focus();return;}result[f.key]=f.type==='checkbox'?el.checked:f.type==='number'?Number(el.value):f.type==='file'?(el.files?.[0]||null):el.value;}finish(result);});
+    $('[data-search-select-input]',backdrop).forEach(input=>{
+      const key=input.dataset.searchSelectInput,hidden=$('[name="'+CSS.escape(key)+'"]',backdrop),results=$('[data-search-select-results="'+CSS.escape(key)+'"]',backdrop),options=(fields.find(f=>f.key===key)?.options||[]).map(o=>typeof o==='string'?{value:o,label:o}:o);
+      const render=()=>{
+        const query=input.value.trim().toLocaleLowerCase();
+        if(!query){results.innerHTML='<div style="padding:9px;color:#718097;font-size:12px">Escribe un nombre, teléfono o dirección para buscar.</div>';return;}
+        const filtered=options.filter(o=>String(o.label||o.value).toLocaleLowerCase().includes(query)).slice(0,30);
+        results.innerHTML=filtered.length?filtered.map(o=>'<button type="button" data-search-select-option="'+esc(o.value)+'" style="display:block;width:100%;padding:9px 10px;border:0;border-radius:6px;background:#fff;text-align:left;font:inherit;font-size:12px;color:#26354e;cursor:pointer">'+esc(o.label||o.value)+'</button>').join(''):'<div style="padding:9px;color:#718097;font-size:12px">No hay avisos sacados que coincidan.</div>';
+      };
+      input.addEventListener('focus',()=>{render();results.hidden=false;});
+      input.addEventListener('input',()=>{hidden.value='';input.setCustomValidity('');render();results.hidden=false;});
+      results.addEventListener('mousedown',e=>e.preventDefault());
+      results.addEventListener('click',e=>{const option=e.target.closest('[data-search-select-option]');if(!option)return;hidden.value=option.dataset.searchSelectOption;input.value=option.textContent;input.setCustomValidity('');results.hidden=true;});
+      input.addEventListener('keydown',e=>{if(e.key==='Escape')results.hidden=true;});
+      document.addEventListener('click',e=>{if(!e.target.closest('.search-select-wrap'))results.hidden=true;});
+    });
+    document.body.append(backdrop);$('[name$="_search"]',backdrop)?.focus();
   });
 }
 function infoDialog(title,content) {
@@ -1288,7 +1308,7 @@ function agendaEligibleNotices() {
     .sort((a,b)=>new Date(b.received_at)-new Date(a.received_at));
 }
 function agendaNoticeLabel(notice) {
-  const parts=[notice.customer_name||'Cliente sin nombre',notice.phone||'Sin teléfono',notice.device||notice.category||'Aviso técnico',notice.landing_id?landingName(notice.landing_id):'Teléfono',formatDate(notice.received_at)];
+  const parts=[notice.customer_name||'Cliente sin nombre',notice.phone||'Sin teléfono',appointmentAddressFromNotice(notice)||'Dirección sin indicar',notice.device||notice.category||'Aviso técnico',notice.landing_id?landingName(notice.landing_id):'Teléfono',formatDate(notice.received_at)];
   return parts.filter(Boolean).join(' · ');
 }
 function appointmentAddressFromNotice(notice) {
@@ -1346,7 +1366,7 @@ async function openAppointmentDialog(existing=null,overrides={}) {
     title:existing?'Editar cita':'Agendar cita',
     description:'Elige un aviso sacado. El cliente y su teléfono se completan desde ese aviso.',
     fields:[
-      {key:'notice_id',label:'Aviso sacado · cliente',type:'select',value:requestedId,required:true,options:eligible.map(n=>({value:n.id,label:agendaNoticeLabel(n)}))},
+      {key:'notice_id',label:'Buscar por nombre, teléfono o dirección',type:'search-select',value:requestedId,required:true,placeholder:'Escribe el nombre, teléfono o dirección',options:eligible.map(n=>({value:n.id,label:agendaNoticeLabel(n)}))},
       {key:'start_at',label:'Fecha y hora',type:'datetime-local',value:localDateTimeValue(source.start_at||defaultAppointmentStart()),required:true},
       {key:'duration_minutes',label:'Duración en minutos',type:'number',value:source.duration_minutes||60,required:true},
       {key:'notes',label:'Notas para el técnico',type:'textarea',value:source.notes||''},
