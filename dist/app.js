@@ -261,7 +261,7 @@ async function loadCompanyData() {
     membershipLoadStage='conectando avisos en tiempo real';
     if(realtimeChannel&&realtimeCompanyId!==c){const oldChannel=realtimeChannel;realtimeChannel=null;realtimeCompanyId=null;try{await db.removeChannel(oldChannel);}catch(removeError){console.warn('No se pudo cerrar la suscripción anterior de avisos',removeError);}}
     if(!realtimeChannel){realtimeCompanyId=c;realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();renderComplaints();renderClientHistory();}}).subscribe();}
-    $('.demo-banner').forEach(el=>el.remove());setConnectionError('');
+    membershipLoadStage='limpiando banners';$('.demo-banner').forEach(el=>el.remove());setConnectionError('');
     membershipLoadStage='dibujando opciones de landing';renderLandingOptions();
     membershipLoadStage='dibujando tabla de avisos';renderRows();
     membershipLoadStage='dibujando informes';renderReport();
