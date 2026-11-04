@@ -381,6 +381,7 @@ function renderRows() {
   renderCardFieldPanel();renderKanban(rows);
   const fresh=rows.filter(n=>n.status==='Nuevo').length,sold=rows.filter(n=>n.status==='Sale').length,lost=rows.filter(n=>n.status==='No sale').length,total=rows.length,managed=sold+lost;
   $('#mTotal').textContent=total;$('#mNew').textContent=fresh;$('#mSold').textContent=sold;$('#mLost').textContent=lost;
+  $('#pendingMetric')?.classList.toggle('metric-pending',fresh>0);
   $('#mConversion').textContent=`${managed?Math.round(sold/managed*100):0} %`;$('#mLostPercent').textContent=`${total?Math.round(lost/total*100):0} % de avisos recibidos`;
   $('#donutTotal').textContent=total;$('#donutSold').textContent=sold;$('#donutLost').textContent=lost;$('#donutNew').textContent=fresh;
   const soldPct=total?sold/total*100:0,lostPct=total?lost/total*100:0;
@@ -498,7 +499,7 @@ function showDetails(id) {
 function installPendingUi() {
   if(!$('#pendingUiStyles')) {
     const style=document.createElement('style');style.id='pendingUiStyles';
-    style.textContent='.metric-clickable{cursor:pointer;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}.metric-clickable:hover{transform:translateY(-2px);border-color:#f3c369;box-shadow:0 10px 26px rgba(28,42,69,.12)}.metric-clickable:focus-visible{outline:3px solid rgba(229,44,13,.35);outline-offset:3px}.pending-modal{width:min(760px,calc(100vw - 28px));max-height:calc(100vh - 36px);overflow:auto}.pending-modal .modal-head{align-items:flex-start}.pending-modal .modal-head p{margin:5px 0 0;color:#7d8798;font-size:12px}.pending-list{display:grid;gap:9px;margin:14px 0}.pending-item{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;padding:13px 15px;background:#fff;border:1px solid #e5e9f1;border-radius:11px;color:#17243a;cursor:pointer;transition:border-color .15s,background .15s,transform .15s}.pending-item:hover,.pending-item:focus-visible{border-color:#e44820;background:#fffaf8;transform:translateY(-1px);outline:none}.pending-item-main{display:grid;gap:4px;min-width:0}.pending-item-main strong{font-size:13px}.pending-item-main span{font-size:12px;color:#4e5d73}.pending-item-main small{font-size:10px;color:#8490a2}.pending-item-action{display:flex;align-items:center;gap:8px;color:#df2c0b;font-size:12px;font-weight:700;white-space:nowrap}.pending-item-action b{font-size:20px}.pending-hint{margin:12px 0 0;color:#7d8798;font-size:11px}.pending-empty{padding:32px 12px;display:grid;gap:7px;text-align:center;color:#7d8798;font-size:12px}.pending-empty strong{color:#18243a;font-size:16px}.pending-back{border:0;background:none;color:#df2c0b;font-family:inherit;font-size:12px;font-weight:600;padding:0;margin:0 0 14px;cursor:pointer}.pending-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.pending-detail-item{min-width:0;border:1px solid #e7eaf0;border-radius:9px;padding:10px 11px;display:grid;gap:5px;background:#fbfcfe}.pending-detail-item span{font-size:10px;color:#8490a2;text-transform:uppercase;letter-spacing:.04em}.pending-detail-item strong{font-size:13px;color:#202d43;white-space:pre-wrap;overflow-wrap:anywhere}.pending-detail-item.wide{grid-column:1/-1}.pending-status-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:18px;flex-wrap:wrap}.pending-status-actions button:disabled{opacity:.55;cursor:not-allowed}@media(max-width:560px){.pending-detail-grid{grid-template-columns:1fr}.pending-item{align-items:flex-start;flex-direction:column}.pending-item-action{align-self:flex-end}.pending-status-actions button{flex:1}}';
+    style.textContent='.metric-clickable{cursor:pointer;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}.metric-pending{background:#fff0e9!important;border-color:#ef9b81!important;box-shadow:inset 4px 0 0 #e44820,0 5px 16px rgba(228,72,32,.09)!important}.metric-clickable:hover{transform:translateY(-2px);border-color:#f3c369;box-shadow:0 10px 26px rgba(28,42,69,.12)}.metric-clickable:focus-visible{outline:3px solid rgba(229,44,13,.35);outline-offset:3px}.pending-modal{width:min(760px,calc(100vw - 28px));max-height:calc(100vh - 36px);overflow:auto}.pending-modal .modal-head{align-items:flex-start}.pending-modal .modal-head p{margin:5px 0 0;color:#7d8798;font-size:12px}.pending-list{display:grid;gap:9px;margin:14px 0}.pending-item{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;padding:13px 15px;background:#fff;border:1px solid #e5e9f1;border-radius:11px;color:#17243a;cursor:pointer;transition:border-color .15s,background .15s,transform .15s}.pending-item:hover,.pending-item:focus-visible{border-color:#e44820;background:#fffaf8;transform:translateY(-1px);outline:none}.pending-item-main{display:grid;gap:4px;min-width:0}.pending-item-main strong{font-size:13px}.pending-item-main span{font-size:12px;color:#4e5d73}.pending-item-main small{font-size:10px;color:#8490a2}.pending-item-action{display:flex;align-items:center;gap:8px;color:#df2c0b;font-size:12px;font-weight:700;white-space:nowrap}.pending-item-action b{font-size:20px}.pending-hint{margin:12px 0 0;color:#7d8798;font-size:11px}.pending-empty{padding:32px 12px;display:grid;gap:7px;text-align:center;color:#7d8798;font-size:12px}.pending-empty strong{color:#18243a;font-size:16px}.pending-back{border:0;background:none;color:#df2c0b;font-family:inherit;font-size:12px;font-weight:600;padding:0;margin:0 0 14px;cursor:pointer}.pending-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.pending-detail-item{min-width:0;border:1px solid #e7eaf0;border-radius:9px;padding:10px 11px;display:grid;gap:5px;background:#fbfcfe}.pending-detail-item span{font-size:10px;color:#8490a2;text-transform:uppercase;letter-spacing:.04em}.pending-detail-item strong{font-size:13px;color:#202d43;white-space:pre-wrap;overflow-wrap:anywhere}.pending-detail-item.wide{grid-column:1/-1}.pending-status-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:18px;flex-wrap:wrap}.pending-status-actions button:disabled{opacity:.55;cursor:not-allowed}@media(max-width:560px){.pending-detail-grid{grid-template-columns:1fr}.pending-item{align-items:flex-start;flex-direction:column}.pending-item-action{align-self:flex-end}.pending-status-actions button{flex:1}}';
     document.head.append(style);
   }
   const metric=$('#mNew')?.closest('.metric');
@@ -532,6 +533,20 @@ function openPendingNotices() {
   backdrop.addEventListener('click',e=>{if(e.target===backdrop||e.target.closest('[data-pending-close]'))close();});
   document.addEventListener('keydown',onKey);
   document.body.append(backdrop);
+  const host=$('.pending-content',backdrop);
+  host.addEventListener('click',async e=>{
+    const open=e.target.closest('[data-pending-open]');
+    if(open){renderPendingNoticeDetail(backdrop,open.getAttribute('data-pending-open'));return;}
+    if(e.target.closest('[data-pending-back]')){renderPendingNoticeList(backdrop);return;}
+    const action=e.target.closest('[data-pending-status]');
+    if(action){
+      const id=backdrop.dataset.pendingNoticeId,status=action.getAttribute('data-pending-status');
+      host.querySelectorAll('button').forEach(button=>button.disabled=true);action.textContent='Guardando…';
+      const saved=await changeStatus(id,status);
+      if(saved){toast(status==='Sale'?'Aviso marcado como sacado.':'Aviso marcado como no sacado.','Gestión actualizada');renderPendingNoticeList(backdrop);}
+      else renderPendingNoticeDetail(backdrop,id);
+    }
+  });
   renderPendingNoticeList(backdrop);
 }
 function renderPendingNoticeList(backdrop) {
@@ -546,11 +561,11 @@ function renderPendingNoticeList(backdrop) {
     const summary=[n.device,n.locality].filter(Boolean).join(' · ')||'Sin aparato ni localidad';
     return '<button type="button" class="pending-item" data-pending-open="'+esc(n.id)+'"><span class="pending-item-main"><strong>'+esc(n.customer_name||'Sin nombre')+'</strong><span>'+esc(summary)+'</span><small>'+esc(origin)+' · '+esc(formatDate(n.received_at))+'</small></span><span class="pending-item-action">Ver datos <b aria-hidden="true">›</b></span></button>';
   }).join('')+'</div><p class="pending-hint">Al elegir un resultado, el aviso saldrá de esta lista de pendientes.</p>';
-  $('[data-pending-open]',host).forEach(button=>button.addEventListener('click',()=>renderPendingNoticeDetail(backdrop,button.dataset.pendingOpen)));
 }
 function renderPendingNoticeDetail(backdrop,id) {
   const n=notices.find(item=>item.id===id);if(!n)return;
   const host=$('.pending-content',backdrop);if(!host)return;
+  backdrop.dataset.pendingNoticeId=id;
   const origin=n.created_by?'Teléfono':landingName(n.landing_id);
   const extras=Object.entries(n.custom_fields||{}).filter(([key])=>!['customer_name','phone','email','locality','postal_code','device','brand','issue'].includes(key)).map(([key,value])=>pendingDetailRow(fields.find(f=>f.field_key===key)?.label||key,value,false)).join('');
   const canManage=canManageCurrentNotices();
@@ -562,15 +577,6 @@ function renderPendingNoticeDetail(backdrop,id) {
     +pendingDetailRow('Recibido',formatDate(n.received_at),false)+pendingDetailRow('Avería',n.issue,true)+extras
     +'</div><div class="pending-status-actions"><button type="button" class="outline-btn" data-pending-status="No sale" '+(canManage?'':'disabled')+'>Aviso no sacado</button><button type="button" class="primary-btn" data-pending-status="Sale" '+(canManage?'':'disabled')+'>Aviso sacado</button></div>'
     +(canManage?'':'<p class="pending-hint">Tu perfil puede consultar los datos, pero no cambiar el estado.</p>');
-  $('[data-pending-back]',host).addEventListener('click',()=>renderPendingNoticeList(backdrop));
-  $('[data-pending-status]',host).forEach(button=>button.addEventListener('click',async()=>{
-    const status=button.dataset.pendingStatus;
-    host.querySelectorAll('button').forEach(item=>item.disabled=true);
-    button.textContent='Guardando…';
-    const saved=await changeStatus(id,status);
-    if(saved){toast(status==='Sale'?'Aviso marcado como sacado.':'Aviso marcado como no sacado.','Gestión actualizada');renderPendingNoticeList(backdrop);}
-    else renderPendingNoticeDetail(backdrop,id);
-  }));
 }
 function setupDate(prefix) {
   const report=prefix==='report', select=$('#'+(report?'reportPeriod':'period'));
