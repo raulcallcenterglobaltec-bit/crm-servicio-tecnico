@@ -1627,7 +1627,7 @@ function wireUI() {
   $('#newComplaint').addEventListener('click',()=>openPhoneNotice('reclamacion'));
   $('#agendaPrev').addEventListener('click',()=>shiftAgendaPeriod(-1));
   $('#agendaNext').addEventListener('click',()=>shiftAgendaPeriod(1));
-  $$('[data-agenda-view]').forEach(button=>button.addEventListener('click',()=>{agendaView=button.dataset.agendaView;renderAgenda();}));
+
   $('#agendaToday').addEventListener('click',()=>{agendaSelectedDate=localDateKey(new Date());agendaMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1);renderAgenda();});
   $('#newAppointment').addEventListener('click',()=>openAppointmentDialog());
 
