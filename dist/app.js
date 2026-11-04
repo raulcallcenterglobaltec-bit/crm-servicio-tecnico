@@ -6,7 +6,7 @@ const $$ = (s, root=document) => [...root.querySelectorAll(s)];
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = value => Number(value || 0).toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
 const categoryFor = device => /aire acondicionado|aerotermia|bomba de calor|acs|caldera|calentador|termo/i.test(String(device||'')) ? 'Clima' : (device ? 'Gama blanca' : null);
-let user=null, isSuperAdmin=false, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, noticeSource='landing', fieldScope='phone', noticeView='table', relatedNoticeMatch=null, selectedHistoryKey=null;
+let user=null, isSuperAdmin=false, companies=[], currentCompany=null, landings=[], notices=[], tariffs=[], fields=[], members=[], realtimeChannel=null, realtimeCompanyId=null, membershipLoadPromise=null, noticeSource='landing', fieldScope='phone', noticeView='table', relatedNoticeMatch=null, selectedHistoryKey=null;
 let landingRoutes={}, notificationChannels=[], formDestinations={}, globalFormRoutes=[];
 let landingListCollapsed=localStorage.getItem('crm-landings-list-collapsed')==='true';
 let fieldEditorRows=[];
@@ -134,19 +134,19 @@ function mountSignOut() {
   userMeta.querySelector('span').textContent=isSuperAdmin?'Superadministrador':(members.find(m=>m.user_id===user?.id)?.role==='consulta'?'Consulta':'Gestor');
   if(!$('#signOut')) { const b=document.createElement('button');b.id='signOut';b.className='signout-btn';b.textContent='Salir';$('.top-actions').append(b);b.addEventListener('click',async()=>{await db.auth.signOut();location.reload();}); }
 }
-async function loadMemberships() {
+async function loadMembershipsOnce() {
   const {data:globalRole,error:globalRoleError}=await db.rpc('is_super_admin');
   if(globalRoleError)throw globalRoleError;
   isSuperAdmin=globalRole===true;applyAccessPermissions();
   const {data,error}=await db.from('company_members').select('company_id,user_id,email,role').eq('user_id',user.id);
-  if(error)throw error; members=data||[];
+  if(error)throw error; members=Array.isArray(data)?data:[];
   applyAccessPermissions();
   const ids=[...new Set(members.map(m=>m.company_id))];
   if(!isSuperAdmin&&!ids.length){showOnboarding();return;}
   const companyQuery=db.from('companies').select('*').order('created_at');
   const {data:rows,error:companyError}=isSuperAdmin?await companyQuery:await companyQuery.in('id',ids);
   if(companyError)throw companyError;
-  companies=rows||[];
+  companies=Array.isArray(rows)?rows:[];
   if(!companies.length){
     currentCompany=null;
     if(!isSuperAdmin){showOnboarding();return;}
@@ -156,6 +156,12 @@ async function loadMemberships() {
   $('#authScreen')?.remove();
   mountSignOut(); renderCompanyPicker(); renderCompanyPage(); renderMembers(); renderIntegrations(); renderSettings(); await loadCompanyData();
 }
+async function loadMemberships() {
+  if(membershipLoadPromise)return membershipLoadPromise;
+  const pending=loadMembershipsOnce();
+  membershipLoadPromise=pending;
+  try{return await pending;}finally{if(membershipLoadPromise===pending)membershipLoadPromise=null;}
+}
 function showOnboarding() {
   localStorage.removeItem('crm-service-first-company');
   $('#authIntro').textContent='Tu cuenta todavía no está asociada a una empresa.';
@@ -163,6 +169,7 @@ function showOnboarding() {
   $('#authError').textContent='Pide al superadministrador que te invite a la empresa correspondiente.';
 }
 function applyAccessPermissions() {
+  members=Array.isArray(members)?members:[];companies=Array.isArray(companies)?companies:[];
   const adminNav=$$('[data-admin-only]');adminNav.forEach(el=>el.hidden=!isSuperAdmin);
   const picker=$('.company-select');if(picker)picker.hidden=!isSuperAdmin;
   const separator=$('.top-sep');if(separator)separator.hidden=!isSuperAdmin;
@@ -226,11 +233,11 @@ async function loadCompanyData() {
       db.from('company_members').select('company_id,user_id,email,role').eq('company_id',c).order('email')
     ]);
     for(const r of results)if(r.error)throw r.error;
-    [landings,notices,tariffs,fields,members]=results.map(r=>r.data||[]);
+    [landings,notices,tariffs,fields,members]=results.map(r=>Array.isArray(r.data)?r.data:[]);
     applyAccessPermissions();
     if(!fields.length){const seeds=['phone','landing'].flatMap(channel=>defaultFields.map(f=>({...f,channel,options:f.options||[],company_id:c})));const {data:createdFields,error}=await db.from('notice_fields').insert(seeds).select();if(error)throw error;fields=createdFields||[];}
-    if(!realtimeChannel){realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();renderComplaints();renderClientHistory();}}).subscribe();}
-    else {await db.removeChannel(realtimeChannel);realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();renderComplaints();renderClientHistory();}}).subscribe();}
+    if(realtimeChannel&&realtimeCompanyId!==c){const oldChannel=realtimeChannel;realtimeChannel=null;realtimeCompanyId=null;try{await db.removeChannel(oldChannel);}catch(removeError){console.warn('No se pudo cerrar la suscripción anterior de avisos',removeError);}}
+    if(!realtimeChannel){realtimeCompanyId=c;realtimeChannel=db.channel('notices-'+c).on('postgres_changes',{event:'INSERT',schema:'public',table:'notices',filter:'company_id=eq.'+c},payload=>{if(payload.new?.company_id===currentCompany?.id){notices.unshift(payload.new);renderRows();renderComplaints();renderClientHistory();}}).subscribe();}
     $$('.demo-banner').forEach(el=>el.remove());setConnectionError('');
     renderLandingOptions();renderRows();renderReport();renderComplaints();renderClientHistory();renderFields();renderPriceRules();renderCompanyPage();renderMembers();renderIntegrations();renderSettings();
     mountSignOut();
@@ -373,7 +380,7 @@ function renderRows() {
       return `<td>${esc(v||'—')}</td>`;
     }).join('');
     const sourceLabel=n.created_by?'Teléfono':landingName(n.landing_id);
-    return `<tr>${cells}<td><span class="source">${esc(sourceLabel)}</span></td><td>${esc(formatDate(n.received_at))}</td><td><select class="status ${statusClass(n.status)}" data-status-id="${n.id}" aria-label="Cambiar estado" ${canManage?'':'disabled'}>${['Nuevo','Sale','No sale'].map(s=>`<option value="${esc(s)}" ${s===n.status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select></td><td>${n.status==='Sale'?money(getUnitPrice(n)):'—'}</td><td><div class="notice-row-actions"><button class="row-action" data-open-id="${n.id}" aria-label="Ver aviso" title="Ver aviso">···</button>${isSuperAdmin?`<button class="row-action" data-edit-id="${n.id}" aria-label="Editar aviso" title="Editar aviso">✎</button><button class="row-action notice-delete" data-delete-id="${n.id}" aria-label="Eliminar aviso" title="Eliminar aviso">×</button>`:''}</div></td></tr>`;
+    return `<tr>${cells}<td><span class="source">${esc(sourceLabel)}</span></td><td>${esc(formatDate(n.received_at))}</td><td><select class="status ${statusClass(n.status)}" data-status-id="${n.id}" aria-label="Cambiar estado" ${canManage?'':'disabled'}>${['Nuevo','Sale','No sale'].map(s=>`<option value="${esc(s)}" ${s===n.status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select></td><td>${n.status==='Sale'?money(getUnitPrice(n)):'—'}</td><td><div class="notice-row-actions"><button class="row-action" data-open-id="${n.id}" aria-label="Ver aviso" title="Ver aviso">···</button>${canManageCurrentNotices()?`<button class="row-action" data-edit-id="${n.id}" aria-label="Editar aviso" title="Editar aviso">✎</button>`:'' }${isSuperAdmin?`<button class="row-action notice-delete" data-delete-id="${n.id}" aria-label="Eliminar aviso" title="Eliminar aviso">×</button>`:''}</div></td></tr>`;
   }).join('');
   $('#emptyState').hidden=rows.length>0;
   const sourceTotal=notices.filter(n=>n.notice_type==='aviso'&&(noticeSource==='phone'?!!n.created_by:!!n.landing_id)).length;
@@ -514,7 +521,7 @@ async function deleteNotice(id){
   return true;
 }
 async function editNotice(id){
-  if(!isSuperAdmin)return false;
+  if(!canManageCurrentNotices())return false;
   const notice=notices.find(item=>item.id===id);if(!notice)return false;
   const base=[
     {key:'customer_name',label:'Cliente',value:notice.customer_name||'',required:true},
@@ -649,7 +656,7 @@ function renderPendingNoticeDetail(backdrop,id) {
     +pendingDetailRow('Código postal',n.postal_code,false)+pendingDetailRow('Marca',n.brand,false)
     +pendingDetailRow('Recibido',formatDate(n.received_at),false)+pendingDetailRow('Avería',n.issue,true)
     +(n.status==='No sale'?pendingDetailRow('Motivo por el que no salió',n.management_reason||'Motivo no indicado',true):'')+extras
-    +'</div><div class="pending-status-actions">'+(isSuperAdmin?'<button type="button" class="outline-btn" data-pending-edit>Editar datos</button><button type="button" class="outline-btn pending-delete" data-pending-delete>Eliminar aviso</button>':'')+'<button type="button" class="outline-btn" data-pending-status="No sale" '+(canManage?'':'disabled')+'>Aviso no sacado</button><button type="button" class="primary-btn" data-pending-status="Sale" '+(canManage?'':'disabled')+'>Aviso sacado</button></div>'
+    +'</div><div class="pending-status-actions">'+(canManageCurrentNotices()?'<button type="button" class="outline-btn" data-pending-edit>Editar datos</button>':'')+(isSuperAdmin?'<button type="button" class="outline-btn pending-delete" data-pending-delete>Eliminar aviso</button>':'')+'<button type="button" class="outline-btn" data-pending-status="No sale" '+(canManage?'':'disabled')+'>Aviso no sacado</button><button type="button" class="primary-btn" data-pending-status="Sale" '+(canManage?'':'disabled')+'>Aviso sacado</button></div>'
     +(canManage?'':'<p class="pending-hint">Tu perfil puede consultar los datos, pero no cambiar el estado.</p>');
 }
 function setupDate(prefix) {
