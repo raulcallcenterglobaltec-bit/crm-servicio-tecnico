@@ -925,20 +925,18 @@ async function openPhoneNotice(type='aviso', preselectedId=null) {
   } else {const hint=$('#relatedNoticeHint');if(hint)hint.hidden=true;}
   $('#modal').classList.add('open');$('#fName').focus();
 }
-function showDuplicatePhoneDialog(matches,normalizedPhone,currentDevice) {
+function showDuplicatePhoneDialog(matches,normalizedPhone) {
   const backdrop=document.createElement('div');backdrop.className='modal-backdrop open';
   const highest=[...document.querySelectorAll('.modal-backdrop')].reduce((max,el)=>Math.max(max,Number(el.style.zIndex)||0),100);
   backdrop.style.zIndex=String(highest+20);
-  const key=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
-  const currentDeviceKey=key(currentDevice);
   const rows=matches.slice(0,12).map(n=>{
     const device=n.device||n.category||'Aparato sin indicar';
-    const sameDevice=!!currentDeviceKey&&key(n.device||n.category)===currentDeviceKey;
+    
     const status=n.status==='Sale'?'Aviso sacado':n.status==='No sale'?'Aviso no sacado':'Nuevo / pendiente';
-    return '<article style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px;border:1px solid #e3e8f1;border-radius:10px;background:#fff"><div style="min-width:0"><strong>'+esc(device)+'</strong><div style="font-size:12px;color:#5d6a7e;margin-top:4px">'+esc(n.issue||'Sin avería indicada')+' · '+esc(formatDate(n.received_at))+'</div><small style="color:#8791a2">'+esc(status)+' · '+esc(n.customer_name||'Sin nombre')+'</small></div><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><button type="button" class="outline-btn" data-duplicate-view="'+esc(n.id)+'">Ver aviso</button>'+(sameDevice&&n.status==='Sale'?'<button type="button" class="outline-btn" data-duplicate-claim="'+esc(n.id)+'">Abrir reclamación</button>':'')+'</div></article>';
+    return '<article style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px;border:1px solid #e3e8f1;border-radius:10px;background:#fff"><div style="min-width:0"><strong>'+esc(device)+'</strong><div style="font-size:12px;color:#5d6a7e;margin-top:4px">'+esc(n.issue||'Sin avería indicada')+' · '+esc(formatDate(n.received_at))+'</div><small style="color:#8791a2">'+esc(status)+' · '+esc(n.customer_name||'Sin nombre')+'</small></div><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><button type="button" class="outline-btn" data-duplicate-view="'+esc(n.id)+'">Ver aviso</button>'+(n.status==='Sale'?'<button type="button" class="outline-btn" data-duplicate-claim="'+esc(n.id)+'">Crear reclamación</button>':'')+'</div></article>';
   }).join('');
   const extra=matches.length>12?'<p style="font-size:12px;color:#7b8798">Se muestran los 12 avisos más recientes.</p>':'';
-  backdrop.innerHTML='<div class="modal" style="width:min(760px,calc(100vw - 28px));max-height:90vh;overflow:auto" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>Cliente repetido</h2><p>Este teléfono ya aparece en '+matches.length+' '+(matches.length===1?'aviso':'avisos')+' de la empresa. Revisa el historial y decide cómo registrarlo.</p></div><button type="button" class="close" data-duplicate-cancel aria-label="Cerrar">×</button></div><div style="display:grid;gap:8px;margin:14px 0">'+rows+'</div>'+extra+'<p style="font-size:12px;color:#68758a">Si es el mismo aparato y una incidencia del aviso anterior, puedes abrir una reclamación vinculada. Para otra avería o aparato, continúa con un aviso nuevo.</p><div class="modal-actions"><button type="button" class="outline-btn" data-duplicate-cancel>Volver al aviso</button><button type="button" class="primary-btn" data-duplicate-new>Aun así, crear aviso nuevo</button></div></div>';
+  backdrop.innerHTML='<div class="modal" style="width:min(760px,calc(100vw - 28px));max-height:90vh;overflow:auto" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>Cliente repetido</h2><p>Este teléfono ya aparece en '+matches.length+' '+(matches.length===1?'aviso':'avisos')+' de la empresa. Revisa el historial y decide cómo registrarlo.</p></div><button type="button" class="close" data-duplicate-cancel aria-label="Cerrar">×</button></div><div style="display:grid;gap:8px;margin:14px 0">'+rows+'</div>'+extra+'<p style="font-size:12px;color:#68758a">Puedes consultar el aviso anterior o crear una reclamación vinculada. Si se trata de otra avería, también puedes crear un aviso nuevo.</p><div class="modal-actions"><button type="button" class="outline-btn" data-duplicate-cancel>Volver al aviso</button><button type="button" class="primary-btn" data-duplicate-new>Aun así, crear aviso nuevo</button></div></div>';
   const close=()=>backdrop.remove();
   backdrop.addEventListener('click',e=>{if(e.target===backdrop||e.target.closest('[data-duplicate-cancel]'))close();});
   $$('[data-duplicate-view]',backdrop).forEach(button=>button.onclick=()=>{const id=button.dataset.duplicateView;close();showDetails(id);});
@@ -953,7 +951,7 @@ async function createNotice(event) {
   const normalizedPhone=normalizePhoneForMatch(phone);
   if(type==='aviso'&&normalizedPhone.length>=9){
     const matches=notices.filter(n=>n.notice_type==='aviso'&&normalizePhoneForMatch(n.phone)===normalizedPhone).sort((a,b)=>new Date(b.received_at)-new Date(a.received_at));
-    if(matches.length&&duplicatePhoneBypass!==normalizedPhone){showDuplicatePhoneDialog(matches,normalizedPhone,$('#fDevice')?.value?.trim()||'');return;}
+    if(matches.length&&duplicatePhoneBypass!==normalizedPhone){showDuplicatePhoneDialog(matches,normalizedPhone);return;}
   }
   duplicatePhoneBypass=null;
   const submitButtons=$$('#noticeForm button[type="submit"]');
