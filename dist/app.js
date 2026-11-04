@@ -814,9 +814,9 @@ async function renderIntegrations() {
   const host=$('#landingIntegrations');
   const channelNames={telegram:'Telegram',whatsapp:'WhatsApp',email:'Correo'};
   host.innerHTML=landings.map(l=>{const selected=Object.prototype.hasOwnProperty.call(landingRoutes,l.id)?landingRoutes[l.id]:null;const routeLabel=selected===null?'Usa destinos generales':selected.length?selected.map(k=>channelNames[k]||k).join(' · '):'Sin avisos automáticos';return `<div class="placeholder-tile"><strong>${esc(l.name)}${l.is_active?'':' · Inactiva'}</strong><small>${esc(l.url||'Sin URL guardada')}</small><small class="landing-channel-summary">Canales: ${esc(routeLabel)}</small><div class="button-row"><button class="outline-btn" data-code="${l.id}">Ver conexión</button><button class="outline-btn" data-landing-routes="${l.id}">Canales de aviso</button><button class="mini-delete" data-delete-landing="${l.id}" aria-label="Desactivar landing">×</button></div></div>`}).join('')||'<div class="empty">Todavía no hay landings conectadas.</div>';
-  $('[data-code]',host).forEach(b=>b.onclick=()=>showLandingCode(landings.find(l=>l.id===b.dataset.code)));
-  $('[data-landing-routes]',host).forEach(b=>b.onclick=()=>editLandingChannels(b.dataset.landingRoutes));
-  $('[data-delete-landing]',host).forEach(b=>b.onclick=async()=>{if(!await confirmDialog('¿Desactivar esta landing? Sus avisos y tarifas históricas se conservarán.'))return;const {error}=await db.from('landings').update({is_active:false}).eq('id',b.dataset.deleteLanding);if(error)toast(errorText(error),'No se pudo desactivar');else await loadCompanyData();});
+  $$('[data-code]',host).forEach(b=>b.onclick=()=>showLandingCode(landings.find(l=>l.id===b.dataset.code)));
+  $$('[data-landing-routes]',host).forEach(b=>b.onclick=()=>editLandingChannels(b.dataset.landingRoutes));
+  $$('[data-delete-landing]',host).forEach(b=>b.onclick=async()=>{if(!await confirmDialog('¿Desactivar esta landing? Sus avisos y tarifas históricas se conservarán.'))return;const {error}=await db.from('landings').update({is_active:false}).eq('id',b.dataset.deleteLanding);if(error)toast(errorText(error),'No se pudo desactivar');else await loadCompanyData();});
 }
 async function renderNotificationRoutes() {
   const host=$('#notificationRoutes');if(!host)return;
