@@ -335,7 +335,7 @@ function renderLandingOptions() {
   const fieldLanding=$('#newFieldLanding');if(fieldLanding){const chosen=fieldLanding.value;fieldLanding.innerHTML=landingChoices;fieldLanding.value=chosen;}
   const fieldFilter=$('#fieldLandingFilter');if(fieldFilter){const chosen=fieldFilter.value;fieldFilter.innerHTML='<option value="">Campos generales (todas las landings)</option>'+landings.filter(l=>l.is_active).map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');fieldFilter.value=chosen;}
 }
-function statusLabel(s) { return s==='Sale'?'Aviso Sacado':s==='No sale'?'Aviso no sacado':s==='Nuevo'?'Pendiente de localizar':'—'; }
+function statusLabel(s) { return s==='Sale'?'Aviso Sacado':s==='No sale'?'Aviso no sacado':s==='Pendiente de localizar'?'Pendiente de localizar':s==='Nuevo'?'Nuevo':'—'; }
 function statusClass(s) { return s==='Sale'?'sold':s==='No sale'?'lost':'new'; }
 function getUnitPrice(n) {
   if(n.status==='Sale')return Number(n.unit_price||0);
@@ -413,9 +413,9 @@ function setNoticeView(view) {
 }
 function renderKanban(rows) {
   const board=$('#kanbanBoard');if(!board)return;
-  const labels={Nuevo:'Avisos nuevos',Sale:'Aviso Sacado', 'No sale':'Aviso no sacado'};
+  const labels={Nuevo:'Avisos nuevos','Pendiente de localizar':'Pendiente de localizar',Sale:'Aviso Sacado','No sale':'Aviso no sacado'};
   const chosen=selectedCardFields(),available=noticeFieldsForCards().filter(f=>chosen.includes(f.field_key)&&f.field_key!=='customer_name');
-  board.innerHTML=['Nuevo','Sale','No sale'].map(status=>{
+  board.innerHTML=['Nuevo','Pendiente de localizar','Sale','No sale'].map(status=>{
     const cards=rows.filter(n=>(n.status||'Nuevo')===status).map(n=>{
       const customer=n.customer_name||'Sin nombre';
       const details=available.map(f=>{
@@ -423,7 +423,7 @@ function renderKanban(rows) {
         return value!==''&&value!==null&&value!==undefined?`<span><b>${esc(f.label)}:</b> ${esc(value)}</span>`:'';
       }).filter(Boolean).join('');
       const origin=n.created_by?'Teléfono':landingName(n.landing_id);
-      return `<article class="notice-card" draggable="${canManageCurrentNotices()}" data-card-id="${esc(n.id)}"><div class="notice-card-head"><div><strong>${esc(customer)}</strong></div><div style="display:flex;align-items:center;gap:5px"><button type="button" class="row-action" data-open-card="${esc(n.id)}" aria-label="Ver aviso">···</button>${isSuperAdmin?`<button type="button" class="mini-delete" data-delete-card="${esc(n.id)}" aria-label="Eliminar aviso" title="Eliminar aviso">×</button>`:''}</div></div><div class="notice-card-fields">${details}<span><b>Origen:</b> ${esc(origin)}</span><span><b>Recibido:</b> ${esc(formatDate(n.received_at))}</span></div><div class="notice-card-foot"><select data-card-status="${esc(n.id)}" aria-label="Cambiar estado del aviso" ${canManageCurrentNotices()?'':'disabled'}>${['Nuevo','Sale','No sale'].map(s=>`<option value="${s}" ${s===status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select>${status==='Sale'?`<small>${money(getUnitPrice(n))}</small>`:''}</div></article>`;
+      return `<article class="notice-card" draggable="${canManageCurrentNotices()}" data-card-id="${esc(n.id)}"><div class="notice-card-head"><div><strong>${esc(customer)}</strong></div><div style="display:flex;align-items:center;gap:5px"><button type="button" class="row-action" data-open-card="${esc(n.id)}" aria-label="Ver aviso">···</button>${isSuperAdmin?`<button type="button" class="mini-delete" data-delete-card="${esc(n.id)}" aria-label="Eliminar aviso" title="Eliminar aviso">×</button>`:''}</div></div><div class="notice-card-fields">${details}<span><b>Origen:</b> ${esc(origin)}</span><span><b>Recibido:</b> ${esc(formatDate(n.received_at))}</span></div><div class="notice-card-foot"><select data-card-status="${esc(n.id)}" aria-label="Cambiar estado del aviso" ${canManageCurrentNotices()?'':'disabled'}>${['Nuevo','Pendiente de localizar','Sale','No sale'].map(s=>`<option value="${s}" ${s===status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select>${status==='Sale'?`<small>${money(getUnitPrice(n))}</small>`:''}</div></article>`;
     }).join('');
     return `<section class="kanban-column" data-drop-status="${status}"><div class="kanban-column-head"><span>${labels[status]}</span><span class="kanban-count">${rows.filter(n=>(n.status||'Nuevo')===status).length}</span></div><div class="kanban-list">${cards||'<div class="empty" style="padding:22px 8px;font-size:10px">Arrastra un aviso aquí</div>'}</div></section>`;
   }).join('');
@@ -459,19 +459,19 @@ function renderRows() {
       return `<td>${esc(v||'—')}</td>`;
     }).join('');
     const sourceLabel=n.created_by?'Teléfono':landingName(n.landing_id);
-    return `<tr>${cells}<td><span class="source">${esc(sourceLabel)}</span></td><td>${esc(formatDate(n.received_at))}</td><td><select class="status ${statusClass(n.status)}" data-status-id="${n.id}" aria-label="Cambiar estado" ${canManage?'':'disabled'}>${['Nuevo','Sale','No sale'].map(s=>`<option value="${esc(s)}" ${s===n.status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select></td><td>${n.status==='Sale'?money(getUnitPrice(n)):'—'}</td><td><div class="notice-row-actions"><button class="row-action" data-open-id="${n.id}" aria-label="Ver aviso" title="Ver aviso">···</button>${canManageCurrentNotices()?`<button class="row-action" data-edit-id="${n.id}" aria-label="Editar aviso" title="Editar aviso">✎</button>`:'' }${isSuperAdmin?`<button class="row-action notice-delete" data-delete-id="${n.id}" aria-label="Eliminar aviso" title="Eliminar aviso">×</button>`:''}</div></td></tr>`;
+    return `<tr>${cells}<td><span class="source">${esc(sourceLabel)}</span></td><td>${esc(formatDate(n.received_at))}</td><td><select class="status ${statusClass(n.status)}" data-status-id="${n.id}" aria-label="Cambiar estado" ${canManage?'':'disabled'}>${['Nuevo','Pendiente de localizar','Sale','No sale'].map(s=>`<option value="${esc(s)}" ${s===n.status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select></td><td>${n.status==='Sale'?money(getUnitPrice(n)):'—'}</td><td><div class="notice-row-actions"><button class="row-action" data-open-id="${n.id}" aria-label="Ver aviso" title="Ver aviso">···</button>${canManageCurrentNotices()?`<button class="row-action" data-edit-id="${n.id}" aria-label="Editar aviso" title="Editar aviso">✎</button>`:'' }${isSuperAdmin?`<button class="row-action notice-delete" data-delete-id="${n.id}" aria-label="Eliminar aviso" title="Eliminar aviso">×</button>`:''}</div></td></tr>`;
   }).join('');
   $('#emptyState').hidden=rows.length>0;
   const sourceTotal=notices.filter(n=>n.notice_type==='aviso'&&(noticeSource==='phone'?!!n.created_by:!!n.landing_id)).length;
   $('#rowCount').textContent=`Mostrando ${rows.length} de ${sourceTotal} avisos`;
   renderCardFieldPanel();renderKanban(rows);
-  const fresh=rows.filter(n=>n.status==='Nuevo').length,sold=rows.filter(n=>n.status==='Sale').length,lost=rows.filter(n=>n.status==='No sale').length,total=rows.length,managed=sold+lost;
-  $('#mTotal').textContent=total;$('#mNew').textContent=fresh;$('#mSold').textContent=sold;$('#mLost').textContent=lost;
+  const fresh=rows.filter(n=>n.status==='Nuevo').length,pending=rows.filter(n=>n.status==='Pendiente de localizar').length,sold=rows.filter(n=>n.status==='Sale').length,lost=rows.filter(n=>n.status==='No sale').length,total=rows.length,managed=sold+lost;
+  $('#mTotal').textContent=total;$('#mNew').textContent=fresh;$('#mPending').textContent=pending;$('#mSold').textContent=sold;$('#mLost').textContent=lost;
   $('#pendingMetric')?.classList.toggle('metric-pending',fresh>0);
   $('#mConversion').textContent=`${managed?Math.round(sold/managed*100):0} %`;$('#mLostPercent').textContent=`${total?Math.round(lost/total*100):0} % de avisos recibidos`;
-  $('#donutTotal').textContent=total;$('#donutSold').textContent=sold;$('#donutLost').textContent=lost;$('#donutNew').textContent=fresh;
-  const soldPct=total?sold/total*100:0,lostPct=total?lost/total*100:0;
-  $('.donut').style.background=`conic-gradient(var(--accent) 0 ${soldPct}%,#efbb65 ${soldPct}% ${soldPct+lostPct}%,#dfe3eb ${soldPct+lostPct}% 100%)`;
+  $('#donutTotal').textContent=total;$('#donutSold').textContent=sold;$('#donutLost').textContent=lost;$('#donutNew').textContent=fresh;$('#donutPending').textContent=pending;
+  const soldPct=total?sold/total*100:0,lostPct=total?lost/total*100:0,newPct=total?fresh/total*100:0,pendingPct=total?pending/total*100:0;
+  $('.donut').style.background=`conic-gradient(var(--accent) 0 ${soldPct}%,#efbb65 ${soldPct}% ${soldPct+lostPct}%,#dfe3eb ${soldPct+lostPct}% ${soldPct+lostPct+newPct}%,#c8a7ff ${soldPct+lostPct+newPct}% ${soldPct+lostPct+newPct+pendingPct}%)`;
   const days=[1,2,3,4,5,6,0].map(day=>{const g=rows.filter(n=>new Date(dateOnly(n.received_at)+'T12:00:00').getDay()===day);return[g.length,g.filter(n=>n.status==='Sale').length,g.filter(n=>n.status==='No sale').length];});
   const max=Math.max(1,...days.flat());
   $$('.bar-group').forEach((g,i)=>$$('.bar',g).forEach((b,j)=>b.style.height=`${days[i]?.[j]/max*100||0}%`));
@@ -571,6 +571,7 @@ function renderClientHistoryDetail(availableGroups=clientHistoryGroups()) {
 }
 function canonicalNoticeStatus(value) {
   const key=String(value??'').trim().toLowerCase();
+  if(['pendiente de localizar','pendiente por localizar'].includes(key))return 'Pendiente de localizar';
   if(['nuevo','pendiente','pendiente de gestión','pendiente de gestion'].includes(key))return 'Nuevo';
   if(['sale','sacado','aviso sacado','salió','salio','salió adelante','salio adelante'].includes(key))return 'Sale';
   if(['no sale','no sacado','aviso no sacado','no válido','no valido','aviso nulo'].includes(key))return 'No sale';
@@ -580,7 +581,7 @@ async function changeStatus(id,status,managementReason=null) {
   if(!canManageCurrentNotices())return false;
   const n=notices.find(x=>x.id===id);if(!n)return false;
   status=canonicalNoticeStatus(status);
-  if(!status){toast('Selecciona Pendiente de localizar, Aviso sacado o Aviso no sacado.','Resultado no válido');return false;}
+  if(!status){toast('Selecciona Nuevo, Pendiente de localizar, Aviso sacado o Aviso no sacado.','Resultado no válido');return false;}
   const wasSale=n.status==='Sale';
   const tariff=tariffForNotice(n);
   const patch={status,managed_at:status==='Nuevo'?null:new Date().toISOString(),unit_price:status==='Sale'?Number(tariff?.price||0):0,management_reason:status==='No sale'?managementReason:null};
@@ -602,7 +603,7 @@ async function requestNoSaleReason(current='') {
 async function handleNoticeStatusChange(id,status,select){
   const notice=notices.find(item=>item.id===id);if(!notice)return;
   status=canonicalNoticeStatus(status);
-  if(!status){toast('Selecciona Pendiente, Aviso sacado o Aviso no sacado.','Resultado no válido');if(select)select.value=notice.status||'Nuevo';return;}
+  if(!status){toast('Selecciona Nuevo, Pendiente de localizar, Aviso sacado o Aviso no sacado.','Resultado no válido');if(select)select.value=notice.status||'Nuevo';return;}
   let reason=null;
   if(status==='No sale'){
     reason=await requestNoSaleReason(notice.management_reason||'');
@@ -682,11 +683,12 @@ function installPendingUi() {
     style.textContent='.notice-row-actions{display:flex;align-items:center;gap:5px;white-space:nowrap}.notice-row-actions .row-action{min-width:29px}.notice-row-actions .notice-delete{color:#df2c0b;border-color:#f2c7bd;background:#fff7f5}.notice-row-actions .notice-delete:hover{background:#ffebe6;border-color:#e44820}.pending-status-actions .pending-delete{color:#c6281f;border-color:#f1c0ba;background:#fff7f5}.metric-clickable{cursor:pointer;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}.metric-pending{background:#fff0e9!important;border-color:#ef9b81!important;box-shadow:inset 4px 0 0 #e44820,0 5px 16px rgba(228,72,32,.09)!important}.metric-clickable:hover{transform:translateY(-2px);border-color:#f3c369;box-shadow:0 10px 26px rgba(28,42,69,.12)}.metric-clickable:focus-visible{outline:3px solid rgba(229,44,13,.35);outline-offset:3px}.pending-modal{width:min(760px,calc(100vw - 28px));max-height:calc(100vh - 36px);overflow:auto}.pending-modal .modal-head{align-items:flex-start}.pending-modal .modal-head p{margin:5px 0 0;color:#7d8798;font-size:12px}.pending-list{display:grid;gap:9px;margin:14px 0}.pending-item{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;padding:13px 15px;background:#fff;border:1px solid #e5e9f1;border-radius:11px;color:#17243a;cursor:pointer;transition:border-color .15s,background .15s,transform .15s}.pending-item:hover,.pending-item:focus-visible{border-color:#e44820;background:#fffaf8;transform:translateY(-1px);outline:none}.pending-item-main{display:grid;gap:4px;min-width:0}.pending-item-main strong{font-size:13px}.pending-item-main span{font-size:12px;color:#4e5d73}.pending-item-main small{font-size:10px;color:#8490a2}.pending-item-action{display:flex;align-items:center;gap:8px;color:#df2c0b;font-size:12px;font-weight:700;white-space:nowrap}.pending-item-action b{font-size:20px}.pending-hint{margin:12px 0 0;color:#7d8798;font-size:11px}.pending-empty{padding:32px 12px;display:grid;gap:7px;text-align:center;color:#7d8798;font-size:12px}.pending-empty strong{color:#18243a;font-size:16px}.pending-back{border:0;background:none;color:#df2c0b;font-family:inherit;font-size:12px;font-weight:600;padding:0;margin:0 0 14px;cursor:pointer}.pending-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.pending-detail-item{min-width:0;border:1px solid #e7eaf0;border-radius:9px;padding:10px 11px;display:grid;gap:5px;background:#fbfcfe}.pending-detail-item span{font-size:10px;color:#8490a2;text-transform:uppercase;letter-spacing:.04em}.pending-detail-item strong{font-size:13px;color:#202d43;white-space:pre-wrap;overflow-wrap:anywhere}.pending-detail-item.wide{grid-column:1/-1}.pending-status-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:18px;flex-wrap:wrap}.pending-status-actions button:disabled{opacity:.55;cursor:not-allowed}@media(max-width:560px){.pending-detail-grid{grid-template-columns:1fr}.pending-item{align-items:flex-start;flex-direction:column}.pending-item-action{align-self:flex-end}.pending-status-actions button{flex:1}}';
     document.head.append(style);
   }
-  const metricActions=[['mTotal','all','Consultar avisos recibidos'],['mNew','Nuevo','Consultar avisos nuevos'],['mSold','Sale','Consultar avisos sacados'],['mLost','No sale','Consultar avisos no sacados']];
+  const metricActions=[['mTotal','all','Consultar avisos recibidos'],['mNew','Nuevo','Consultar avisos nuevos'],['mPending','Pendiente de localizar','Consultar pendientes de localizar'],['mSold','Sale','Consultar avisos sacados'],['mLost','No sale','Consultar avisos no sacados']];
   for(const [valueId,status,label] of metricActions){
     const metric=$('#'+valueId)?.closest('.metric');if(!metric)continue;
     metric.classList.add('metric-clickable');metric.dataset.noticeList=status;metric.setAttribute('role','button');metric.setAttribute('tabindex','0');metric.setAttribute('aria-label',label);
-    if(valueId==='mNew'){metric.id='pendingMetric';const foot=$('.metric-foot',metric);if(foot)foot.textContent='Pendientes de gestión · Pulsa para revisar';}
+    if(valueId==='mNew'){const foot=$('.metric-foot',metric);if(foot)foot.textContent='Solicitudes nuevas · Pulsa para revisar';}
+    if(valueId==='mPending'){metric.id='pendingMetric';metric.classList.add('metric-pending');const foot=$('.metric-foot',metric);if(foot)foot.textContent='Pendientes de localizar · Pulsa para revisar';}
   }
   const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
   let textNode;
@@ -701,7 +703,7 @@ function pendingDetailRow(label,value,wide) {
 }
 function openPendingNotices(status='Nuevo') {
   $('.pending-modal-backdrop')?.remove();
-  const titles={all:'Avisos recibidos',Nuevo:'Avisos nuevos',Sale:'Avisos sacados','No sale':'Avisos no sacados'};
+  const titles={all:'Avisos recibidos',Nuevo:'Avisos nuevos','Pendiente de localizar':'Pendiente de localizar',Sale:'Avisos sacados','No sale':'Avisos no sacados'};
   const title=titles[status]||titles.Nuevo;
   const backdrop=document.createElement('div');backdrop.className='modal-backdrop open pending-modal-backdrop';
   backdrop.dataset.pendingStatus=status;
@@ -979,7 +981,7 @@ function updateRecordFormMode() {
     status.value=previous==='Sale'||previous==='No sale'?previous:(relatedNoticeMatch?'Sale':'No sale');
   } else if(status&&statusLabel){
     statusLabel.textContent='Resultado del aviso';
-    status.innerHTML='<option value="Nuevo">Pendiente de localizar</option><option value="Sale">Aviso Sacado</option><option value="No sale">Aviso no sacado</option>';
+    status.innerHTML='<option value="Nuevo">Nuevo</option><option value="Pendiente de localizar">Pendiente de localizar</option><option value="Sale">Aviso Sacado</option><option value="No sale">Aviso no sacado</option>';
     status.value='Nuevo';
   }
   const deviceField=$('[data-field-code="device"]'),brandField=$('[data-field-code="brand"]'),issueField=$('[data-field-code="issue"]');
