@@ -6,19 +6,49 @@ Deno.serve(async (req) => {
   const user = await authenticatedUser(req)
   if (!user) return json({ error: 'Debes iniciar sesión.' }, 401)
   try {
-    const { company_id, kind, config, enabled = true, action = 'save', routes, destinations } = await req.json()
+    const { company_id, kind, config, enabled = true, action = 'save', routes, destinations, landing_id, landing_channels } = await req.json()
     if (!company_id) return json({ error: 'Empresa no válida.' }, 400)
     const admin = adminClient()
     const role = await companyRole(admin, company_id, user.id)
     if (role !== 'super_admin') return json({ error: 'Solo el superadministrador puede cambiar integraciones.' }, 403)
 
-    if (action === 'get_routes' || action === 'save_routes') {
+    if (['get_routes', 'save_routes', 'save_landing_routes'].includes(action)) {
       const { data: rows, error: rowsError } = await admin.from('company_integrations').select('kind,enabled,encrypted_config').eq('company_id', company_id)
       if (rowsError) throw rowsError
       const routeTypes = ['form','phone','complaint'] as const
       const channelTypes = ['telegram','whatsapp','email'] as const
+      if (action === 'save_landing_routes') {
+        if (typeof landing_id !== 'string' || !Array.isArray(landing_channels) || landing_channels.some((value: string) => !channelTypes.includes(value as any))) return json({ error: 'Landing o canales no válidos.' }, 400)
+        const { data: landing, error: landingError } = await admin.from('landings').select('id').eq('company_id', company_id).eq('id', landing_id).maybeSingle()
+        if (landingError) throw landingError
+        if (!landing) return json({ error: 'La landing no pertenece a esta empresa.' }, 404)
+        const allRows = rows || []
+        if (!allRows.length) return json({ error: 'Configura al menos un canal antes de asignarlo a una landing.' }, 400)
+        const enabledRows = allRows.filter(x => x.enabled)
+        for (const channel of landing_channels as string[]) {
+          const row = enabledRows.find(item => item.kind === channel)
+          if (!row) return json({ error: 'Activa y configura ' + channel + ' antes de asignarlo a esta landing.' }, 400)
+          const channelConfig = await decryptConfig(row.encrypted_config)
+          const target = integrationDestination(channelConfig, channel, 'form')
+          const hasTarget = Array.isArray(target) ? target.length > 0 : !!String(target || '').trim()
+          if (!hasTarget) return json({ error: 'Indica primero el destino de ' + channel + ' para los avisos de formulario.' }, 400)
+        }
+        for (const row of allRows) {
+          const current = await decryptConfig(row.encrypted_config)
+          current.landing_routes = { ...(current.landing_routes || {}), [landing_id]: landing_channels }
+          const encrypted_config = await encryptConfig(current)
+          const { error } = await admin.from('company_integrations').update({ encrypted_config, updated_at: new Date().toISOString() }).eq('company_id', company_id).eq('kind', row.kind)
+          if (error) throw error
+        }
+        return json({ ok: true, landing_id, landing_channels })
+      }
       if (action === 'get_routes') {
         const enabledRows = (rows || []).filter(x => x.enabled)
+        const landingRoutes: Record<string,string[]> = {}
+        for (const row of enabledRows) {
+          const current = await decryptConfig(row.encrypted_config)
+          for (const [id, kinds] of Object.entries(current.landing_routes || {})) if (Array.isArray(kinds)) landingRoutes[id] = kinds as string[]
+        }
         const channels = enabledRows.map(x => x.kind)
         const saved: Record<string,string[]> = { form: [], phone: [], complaint: [] }
         const blocked: Record<string,string[]> = { form: [], phone: [], complaint: [] }
@@ -38,7 +68,7 @@ Deno.serve(async (req) => {
             else if (selected && !hasTarget) blocked[type].push(row.kind)
           }
         }
-        return json({ ok: true, channels, routes: saved, blocked, destinations: targets })
+        return json({ ok: true, channels, routes: saved, blocked, destinations: targets, landing_routes: landingRoutes })
       }
       if (!routes || routeTypes.some(type => !Array.isArray(routes[type]) || routes[type].some((value: string) => !channelTypes.includes(value as any)))) return json({ error: 'Selecciona destinos válidos para cada tipo de aviso.' }, 400)
       const enabledRows = (rows || []).filter(x => x.enabled)
@@ -87,8 +117,15 @@ Deno.serve(async (req) => {
     const { data: existing, error: existingError } = await admin.from('company_integrations').select('encrypted_config').eq('company_id', company_id).eq('kind', kind).maybeSingle()
     if (existingError) throw existingError
     const previous = existing?.encrypted_config ? await decryptConfig(existing.encrypted_config) : null
+    const { data: companyRows, error: companyRowsError } = await admin.from('company_integrations').select('encrypted_config').eq('company_id', company_id)
+    if (companyRowsError) throw companyRowsError
+    const inheritedLandingRoutes: Record<string,string[]> = {}
+    for (const row of companyRows || []) {
+      const current = await decryptConfig(row.encrypted_config)
+      Object.assign(inheritedLandingRoutes, current.landing_routes || {})
+    }
     const savedRoutes = previous?.routes || (previous ? { form: [kind], phone: [kind], complaint: [kind] } : { form: [], phone: [], complaint: [] })
-    const encrypted_config = await encryptConfig({ ...(previous || {}), ...config, routes: savedRoutes })
+    const encrypted_config = await encryptConfig({ ...(previous || {}), ...config, routes: savedRoutes, landing_routes: { ...inheritedLandingRoutes, ...(previous?.landing_routes || {}) } })
     const { error } = await admin.from('company_integrations').upsert({ company_id, kind, enabled: !!enabled, encrypted_config, updated_at: new Date().toISOString() }, { onConflict: 'company_id,kind' })
     if (error) throw error
     return json({ ok: true })
