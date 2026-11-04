@@ -13,7 +13,7 @@ Deno.serve(async (req) => {
       const landingKey = text(new URL(req.url).searchParams.get('landing_key'), 200)
       if (!landingKey) return json({ error: 'Falta la clave de la landing.' }, 400, { 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' })
       const admin = adminClient()
-      const { data: landing, error: landingError } = await admin.from('landings').select('id,company_id,name,is_active').eq('endpoint_key', landingKey).maybeSingle()
+      const { data: landing, error: landingError } = await admin.from('landings').select('id,company_id,name,is_active,logo_path').eq('endpoint_key', landingKey).maybeSingle()
       if (landingError) throw landingError
       if (!landing || !landing.is_active) return json({ error: 'Landing no encontrada o desactivada.' }, 404, { 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' })
       const [{ data: fieldRows, error: fieldsError }, { data: company, error: companyError }] = await Promise.all([
@@ -23,7 +23,7 @@ Deno.serve(async (req) => {
       if (fieldsError) throw fieldsError
       if (companyError) throw companyError
       const fields = (fieldRows || []).filter(field => !field.landing_id || field.landing_id === landing.id).map(({ field_key, label, field_type, options, required, position }) => ({ field_key, label, field_type, options, required, position }))
-      return json({ landing: { name: landing.name }, company: company || { name: '', primary_color: '#5267e8', logo_path: null }, fields }, 200, { 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Cache-Control': 'no-store' })
+      return json({ landing: { name: landing.name, logo_path: landing.logo_path || null }, company: company || { name: '', primary_color: '#5267e8', logo_path: null }, fields }, 200, { 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Cache-Control': 'no-store' })
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : 'No se pudo cargar el formulario.' }, 400, { 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' })
     }
