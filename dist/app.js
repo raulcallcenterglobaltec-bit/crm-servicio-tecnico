@@ -251,7 +251,7 @@ function renderLandingOptions() {
   const fieldLanding=$('#newFieldLanding');if(fieldLanding){const chosen=fieldLanding.value;fieldLanding.innerHTML=landingChoices;fieldLanding.value=chosen;}
   const fieldFilter=$('#fieldLandingFilter');if(fieldFilter){const chosen=fieldFilter.value;fieldFilter.innerHTML='<option value="">Campos generales (todas las landings)</option>'+landings.filter(l=>l.is_active).map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');fieldFilter.value=chosen;}
 }
-function statusLabel(s) { return s==='Sale'?'Aviso Sacado':s==='No sale'?'Aviso Nulo':s==='Nuevo'?'Nuevo':'—'; }
+function statusLabel(s) { return s==='Sale'?'Aviso Sacado':s==='No sale'?'Aviso no sacado':s==='Nuevo'?'Nuevo':'—'; }
 function statusClass(s) { return s==='Sale'?'sold':s==='No sale'?'lost':'new'; }
 function getUnitPrice(n) {
   if(n.status==='Sale')return Number(n.unit_price||0);
@@ -329,7 +329,7 @@ function setNoticeView(view) {
 }
 function renderKanban(rows) {
   const board=$('#kanbanBoard');if(!board)return;
-  const labels={Nuevo:'Avisos nuevos',Sale:'Aviso Sacado', 'No sale':'Aviso Nulo'};
+  const labels={Nuevo:'Avisos nuevos',Sale:'Aviso Sacado', 'No sale':'Aviso no sacado'};
   const chosen=selectedCardFields(),available=noticeFieldsForCards().filter(f=>chosen.includes(f.field_key)&&f.field_key!=='customer_name');
   board.innerHTML=['Nuevo','Sale','No sale'].map(status=>{
     const cards=rows.filter(n=>(n.status||'Nuevo')===status).map(n=>{
@@ -467,15 +467,16 @@ function renderClientHistoryDetail(availableGroups=clientHistoryGroups()) {
   $$('[data-history-open]',host).forEach(button=>button.addEventListener('click',()=>showDetails(button.dataset.historyOpen)));
 }
 async function changeStatus(id,status) {
-  if(!canManageCurrentNotices())return;
-  const n=notices.find(x=>x.id===id);if(!n)return;
+  if(!canManageCurrentNotices())return false;
+  const n=notices.find(x=>x.id===id);if(!n)return false;
   const wasSale=n.status==='Sale';
   const tariff=tariffForNotice(n);
   const patch={status,managed_at:status==='Nuevo'?null:new Date().toISOString(),unit_price:status==='Sale'?Number(tariff?.price||0):0};
   const {data,error}=await db.from('notices').update(patch).eq('id',id).select().single();
-  if(error){toast(errorText(error),'No se pudo guardar');renderRows();return;}
+  if(error){toast(errorText(error),'No se pudo guardar');renderRows();return false;}
   Object.assign(n,data);renderRows();renderComplaints();renderClientHistory();
   if(!wasSale&&status==='Sale'&&n.created_by&&!n.landing_id&&n.notice_type==='aviso')await sendNoticeToConfiguredIntegrations(n);
+  return true;
 }
 async function sendNoticeToConfiguredIntegrations(notice) {
   const {data,error}=await db.functions.invoke('notify-notice',{body:{notice_id:notice.id}});
@@ -493,6 +494,66 @@ function showDetails(id) {
   const typeLabel=n.notice_type==='anulacion'?'Anulación':n.notice_type==='reclamacion'?'Reclamación':'Aviso técnico';
   const resultLabel=n.notice_type==='aviso'?statusLabel(n.status):n.status==='Sale'?'Envío solicitado':n.status==='No sale'?'No es nuestra (cliente equivocado)':'Registro anterior';
   infoDialog('Detalle del registro',`Tipo: ${typeLabel}\nCliente: ${n.customer_name}\nTeléfono: ${n.phone}\nCorreo: ${n.email||'—'}\nAparato: ${n.device||'—'}\nOrigen: ${sourceLabel}\nResultado: ${resultLabel}\nRecibido: ${formatDate(n.received_at)}\nLocalidad: ${n.locality||'—'}\nCódigo postal: ${n.postal_code||'—'}\nMarca: ${n.brand||'—'}\nDetalle: ${n.issue||'—'}\n${custom}`);
+}
+function pendingNoticeRows() {
+  const landingFilter=noticeSource==='landing'?($('#landingFilter')?.value||'all'):'all';
+  return notices.filter(n=>n.notice_type==='aviso'&&n.status==='Nuevo'
+    &&(noticeSource==='phone'?!!n.created_by:!!n.landing_id)
+    &&(landingFilter==='all'||n.landing_id===landingFilter))
+    .sort((a,b)=>new Date(b.received_at)-new Date(a.received_at));
+}
+function pendingDetailRow(label,value,wide) {
+  return '<div class="pending-detail-item'+(wide?' wide':'')+'"><span>'+esc(label)+'</span><strong>'+esc(value||'—')+'</strong></div>';
+}
+function openPendingNotices() {
+  const existing=$('.pending-modal-backdrop');if(existing){existing.remove();return;}
+  const backdrop=document.createElement('div');backdrop.className='modal-backdrop open pending-modal-backdrop';
+  backdrop.style.zIndex='130';
+  backdrop.innerHTML='<div class="modal pending-modal" role="dialog" aria-modal="true" aria-labelledby="pendingModalTitle"><div class="modal-head"><div><h2 id="pendingModalTitle">Pendientes de gestión</h2><p>Selecciona un aviso para ver sus datos y marcar el resultado.</p></div><button class="close" type="button" data-pending-close aria-label="Cerrar">×</button></div><div class="pending-content"></div></div>';
+  const close=()=>{backdrop.remove();document.removeEventListener('keydown',onKey);};
+  const onKey=e=>{if(e.key==='Escape')close();};
+  backdrop.addEventListener('click',e=>{if(e.target===backdrop||e.target.closest('[data-pending-close]'))close();});
+  document.addEventListener('keydown',onKey);
+  document.body.append(backdrop);
+  renderPendingNoticeList(backdrop);
+}
+function renderPendingNoticeList(backdrop) {
+  const host=$('.pending-content',backdrop);if(!host)return;
+  const rows=pendingNoticeRows();
+  if(!rows.length) {
+    host.innerHTML='<div class="pending-empty"><strong>Todo al día</strong><span>No hay avisos nuevos pendientes en esta vista.</span></div>';
+    return;
+  }
+  host.innerHTML='<div class="pending-list">'+rows.map(n=>{
+    const origin=n.created_by?'Teléfono':landingName(n.landing_id);
+    const summary=[n.device,n.locality].filter(Boolean).join(' · ')||'Sin aparato ni localidad';
+    return '<button type="button" class="pending-item" data-pending-open="'+esc(n.id)+'"><span class="pending-item-main"><strong>'+esc(n.customer_name||'Sin nombre')+'</strong><span>'+esc(summary)+'</span><small>'+esc(origin)+' · '+esc(formatDate(n.received_at))+'</small></span><span class="pending-item-action">Ver datos <b aria-hidden="true">›</b></span></button>';
+  }).join('')+'</div><p class="pending-hint">Al elegir un resultado, el aviso saldrá de esta lista de pendientes.</p>';
+  $('[data-pending-open]',host).forEach(button=>button.addEventListener('click',()=>renderPendingNoticeDetail(backdrop,button.dataset.pendingOpen)));
+}
+function renderPendingNoticeDetail(backdrop,id) {
+  const n=notices.find(item=>item.id===id);if(!n)return;
+  const host=$('.pending-content',backdrop);if(!host)return;
+  const origin=n.created_by?'Teléfono':landingName(n.landing_id);
+  const extras=Object.entries(n.custom_fields||{}).filter(([key])=>!['customer_name','phone','email','locality','postal_code','device','brand','issue'].includes(key)).map(([key,value])=>pendingDetailRow(fields.find(f=>f.field_key===key)?.label||key,value,false)).join('');
+  const canManage=canManageCurrentNotices();
+  host.innerHTML='<button type="button" class="pending-back" data-pending-back>‹ Volver a pendientes</button><div class="pending-detail-grid">'
+    +pendingDetailRow('Cliente',n.customer_name,false)+pendingDetailRow('Teléfono',n.phone,false)
+    +pendingDetailRow('Correo',n.email,false)+pendingDetailRow('Origen',origin,false)
+    +pendingDetailRow('Aparato',n.device,false)+pendingDetailRow('Localidad',n.locality,false)
+    +pendingDetailRow('Código postal',n.postal_code,false)+pendingDetailRow('Marca',n.brand,false)
+    +pendingDetailRow('Recibido',formatDate(n.received_at),false)+pendingDetailRow('Avería',n.issue,true)+extras
+    +'</div><div class="pending-status-actions"><button type="button" class="outline-btn" data-pending-status="No sale" '+(canManage?'':'disabled')+'>Aviso no sacado</button><button type="button" class="primary-btn" data-pending-status="Sale" '+(canManage?'':'disabled')+'>Aviso sacado</button></div>'
+    +(canManage?'':'<p class="pending-hint">Tu perfil puede consultar los datos, pero no cambiar el estado.</p>');
+  $('[data-pending-back]',host).addEventListener('click',()=>renderPendingNoticeList(backdrop));
+  $('[data-pending-status]',host).forEach(button=>button.addEventListener('click',async()=>{
+    const status=button.dataset.pendingStatus;
+    host.querySelectorAll('button').forEach(item=>item.disabled=true);
+    button.textContent='Guardando…';
+    const saved=await changeStatus(id,status);
+    if(saved){toast(status==='Sale'?'Aviso marcado como sacado.':'Aviso marcado como no sacado.','Gestión actualizada');renderPendingNoticeList(backdrop);}
+    else renderPendingNoticeDetail(backdrop,id);
+  }));
 }
 function setupDate(prefix) {
   const report=prefix==='report', select=$('#'+(report?'reportPeriod':'period'));
@@ -524,7 +585,7 @@ function renderReport() {
   $('#reportRevenue').textContent=money(revenue);$('#reportTotal').textContent=rows.length;
   $('#reportBestLanding').textContent=best?.total?best.landing.name:'—';$('#reportBestDetail').textContent=best?.total?`${best.total} avisos · ${best.sold} Avisos Sacados`:'0 avisos sacados';
   $('#reportLandingResults').innerHTML=groups.filter(g=>g.total>0).map(g=>`<div class="placeholder-tile"><strong>${esc(g.landing.name)}</strong><small>${g.total} avisos · ${g.sold} Avisos Sacados · ${g.lost} Avisos Nulos</small></div>`).join('')||'<div class="empty">No hay avisos de formulario en este filtro.</div>';
-  $('#reportPhoneResults').innerHTML=sourceCard('Avisos telefónicos',phoneRows,['Pendiente','Aviso Sacado','Aviso Nulo'],'Conversión de gestionados');
+  $('#reportPhoneResults').innerHTML=sourceCard('Avisos telefónicos',phoneRows,['Pendiente','Aviso Sacado','Aviso no sacado'],'Conversión de gestionados');
   $('#reportComplaintResults').innerHTML=sourceCard('Reclamaciones',complaintRows,['Pendiente','Envío solicitado','Cliente equivocado'],'Envío solicitado')+sourceCard('Anulaciones',cancellationRows,['Pendiente','Envío solicitado','Cliente equivocado'],'Envío solicitado');
   const totals=new Map();sold.forEach(n=>{const origin=n.landing_id?landingName(n.landing_id):`Teléfono · ${n.locality||'Ciudad sin indicar'}`;const k=`${origin} · ${n.category||'Sin categoría'}`,v=totals.get(k)||{amount:0,count:0};v.amount+=Number(n.unit_price||0);v.count++;totals.set(k,v);});
   $('#reportPriceRows').innerHTML=[...totals].sort((a,b)=>b[1].amount-a[1].amount).map(([label,v])=>`<div style="display:flex;justify-content:space-between;border-bottom:1px solid #f0f1f5;padding:8px 0;font-size:11px"><span>${esc(label)} <small>(${v.count})</small></span><strong>${money(v.amount)}</strong></div>`).join('')||'<div class="empty">No hay avisos sacados en este filtro.</div>';
@@ -620,7 +681,7 @@ function updateRecordFormMode() {
     status.value=previous==='Sale'||previous==='No sale'?previous:(relatedNoticeMatch?'Sale':'No sale');
   } else if(status&&statusLabel){
     statusLabel.textContent='Resultado del aviso';
-    status.innerHTML='<option value="Nuevo">Pendiente</option><option value="Sale">Aviso Sacado</option><option value="No sale">Aviso Nulo</option>';
+    status.innerHTML='<option value="Nuevo">Pendiente</option><option value="Sale">Aviso Sacado</option><option value="No sale">Aviso no sacado</option>';
     status.value='Nuevo';
   }
   const deviceField=$('[data-field-code="device"]'),brandField=$('[data-field-code="brand"]'),issueField=$('[data-field-code="issue"]');
@@ -945,7 +1006,9 @@ function wireUI() {
   $('#modal').addEventListener('click',e=>{if(e.target.id==='modal')e.currentTarget.classList.remove('open');});
   $('#noticeForm').addEventListener('submit',createNotice);
   $('#menuToggle').addEventListener('click',()=>$('#sidebar').classList.toggle('open'));
-  $('#pendingLandingButton').addEventListener('click',()=>{$('#statusFilter').value='Nuevo';renderRows();});
+  $('#pendingLandingButton').addEventListener('click',openPendingNotices);
+  $('#pendingMetric').addEventListener('click',openPendingNotices);
+  $('#pendingMetric').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openPendingNotices();}});
   $('#exportBtn').addEventListener('click',()=>exportCsv(false));$('#reportExport').addEventListener('click',()=>exportCsv(true));
   $('#addField').addEventListener('click',addField);
   $$('[data-settings-tab]').forEach(button=>button.addEventListener('click',()=>showSettingsTab(button.dataset.settingsTab)));
