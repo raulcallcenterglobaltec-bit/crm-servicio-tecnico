@@ -421,7 +421,7 @@ function renderKanban(rows) {
         return value!==''&&value!==null&&value!==undefined?`<span><b>${esc(f.label)}:</b> ${esc(value)}</span>`:'';
       }).filter(Boolean).join('');
       const origin=n.created_by?'Teléfono':landingName(n.landing_id);
-      return `<article class="notice-card" draggable="${canManageCurrentNotices()}" data-card-id="${esc(n.id)}"><div class="notice-card-head"><div><strong>${esc(customer)}</strong></div><button type="button" class="row-action" data-open-card="${esc(n.id)}" aria-label="Ver aviso">···</button></div><div class="notice-card-fields">${details}<span><b>Origen:</b> ${esc(origin)}</span><span><b>Recibido:</b> ${esc(formatDate(n.received_at))}</span></div><div class="notice-card-foot"><select data-card-status="${esc(n.id)}" aria-label="Cambiar estado del aviso" ${canManageCurrentNotices()?'':'disabled'}>${['Nuevo','Sale','No sale'].map(s=>`<option value="${s}" ${s===status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select>${status==='Sale'?`<small>${money(getUnitPrice(n))}</small>`:''}</div></article>`;
+      return `<article class="notice-card" draggable="${canManageCurrentNotices()}" data-card-id="${esc(n.id)}"><div class="notice-card-head"><div><strong>${esc(customer)}</strong></div><div style="display:flex;align-items:center;gap:5px"><button type="button" class="row-action" data-open-card="${esc(n.id)}" aria-label="Ver aviso">···</button>${isSuperAdmin?`<button type="button" class="mini-delete" data-delete-card="${esc(n.id)}" aria-label="Eliminar aviso" title="Eliminar aviso">×</button>`:''}</div></div><div class="notice-card-fields">${details}<span><b>Origen:</b> ${esc(origin)}</span><span><b>Recibido:</b> ${esc(formatDate(n.received_at))}</span></div><div class="notice-card-foot"><select data-card-status="${esc(n.id)}" aria-label="Cambiar estado del aviso" ${canManageCurrentNotices()?'':'disabled'}>${['Nuevo','Sale','No sale'].map(s=>`<option value="${s}" ${s===status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select>${status==='Sale'?`<small>${money(getUnitPrice(n))}</small>`:''}</div></article>`;
     }).join('');
     return `<section class="kanban-column" data-drop-status="${status}"><div class="kanban-column-head"><span>${labels[status]}</span><span class="kanban-count">${rows.filter(n=>(n.status||'Nuevo')===status).length}</span></div><div class="kanban-list">${cards||'<div class="empty" style="padding:22px 8px;font-size:10px">Arrastra un aviso aquí</div>'}</div></section>`;
   }).join('');
@@ -435,7 +435,8 @@ function renderKanban(rows) {
     column.addEventListener('drop',async event=>{event.preventDefault();column.classList.remove('drag-over');const id=event.dataTransfer.getData('text/plain');if(id)await handleNoticeStatusChange(id,column.dataset.dropStatus,null);});
   });
   $$('[data-card-status]',board).forEach(select=>select.addEventListener('change',event=>handleNoticeStatusChange(event.target.dataset.cardStatus,event.target.value,event.target)));
-  $$('[data-open-card]',board).forEach(button=>button.addEventListener('click',()=>showDetails(button.dataset.openCard)));
+  $('[data-open-card]',board).forEach(button=>button.addEventListener('click',()=>showDetails(button.dataset.openCard)));
+  $('[data-delete-card]',board).forEach(button=>button.addEventListener('click',()=>deleteNotice(button.dataset.deleteCard)));
 }
 function renderRows() {
   const body=$('#noticeRows');if(!body)return;
@@ -597,7 +598,7 @@ async function handleNoticeStatusChange(id,status,select){
   if(!saved){if(select)select.value=notice.status||'Nuevo';else renderRows();}
 }
 async function deleteNotice(id){
-  if(!isSuperAdmin)return false;
+  if(!isSuperAdmin){toast('Solo el superadministrador puede eliminar avisos.','Acceso restringido');return false;}
   const notice=notices.find(item=>item.id===id);if(!notice)return false;
   const name=notice.customer_name||'este aviso';
   if(!await confirmDialog('Se eliminará definitivamente el aviso de '+name+'. Esta acción no se puede deshacer.'))return false;
