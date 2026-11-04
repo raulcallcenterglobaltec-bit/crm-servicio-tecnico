@@ -570,10 +570,10 @@ function renderClientHistoryDetail(availableGroups=clientHistoryGroups()) {
   $$('[data-history-open]',host).forEach(button=>button.addEventListener('click',()=>showDetails(button.dataset.historyOpen)));
 }
 function canonicalNoticeStatus(value) {
-  const key=String(value??'').trim().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'');
-  if(['nuevo','pendiente','pendiente de gestion'].includes(key))return 'Nuevo';
-  if(['sale','sacado','aviso sacado','salio','salio adelante'].includes(key))return 'Sale';
-  if(['no sale','no sacado','aviso no sacado','no valido','aviso nulo'].includes(key))return 'No sale';
+  const key=String(value??'').trim().toLowerCase();
+  if(['nuevo','pendiente','pendiente de gestión','pendiente de gestion'].includes(key))return 'Nuevo';
+  if(['sale','sacado','aviso sacado','salió','salio','salió adelante','salio adelante'].includes(key))return 'Sale';
+  if(['no sale','no sacado','aviso no sacado','no válido','no valido','aviso nulo'].includes(key))return 'No sale';
   return null;
 }
 async function changeStatus(id,status,managementReason=null) {
