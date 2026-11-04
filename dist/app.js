@@ -701,6 +701,11 @@ function openPendingNotices(status='Nuevo') {
   document.addEventListener('keydown',onKey);
   document.body.append(backdrop);
   const host=$('.pending-content',backdrop);
+  host.addEventListener('change',event=>{
+    const select=event.target.closest('[data-pending-result]');if(!select)return;
+    backdrop.dataset.pendingResult=select.value;
+    const schedule=$('[data-pending-schedule]',host);if(schedule)schedule.hidden=select.value!=='Sale';
+  });
   host.addEventListener('click',async e=>{
     const open=e.target.closest('[data-pending-open]');
     if(open){renderPendingNoticeDetail(backdrop,open.getAttribute('data-pending-open'));return;}
@@ -708,14 +713,28 @@ function openPendingNotices(status='Nuevo') {
     const id=backdrop.dataset.pendingNoticeId;
     if(e.target.closest('[data-pending-edit]')){await editNotice(id);renderPendingNoticeDetail(backdrop,id);return;}
     if(e.target.closest('[data-pending-delete]')){if(await deleteNotice(id))renderPendingNoticeList(backdrop);return;}
-    if(e.target.closest('[data-pending-schedule]')){
+    const saveButton=e.target.closest('[data-pending-save]');
+    const scheduleButton=e.target.closest('[data-pending-schedule]');
+    if(saveButton||scheduleButton){
       const notice=notices.find(item=>item.id===id);
-      if(!notice||!canManageCurrentNotices()||!notice.landing_id)return;
+      if(!notice||!canManageCurrentNotices())return;
+      const status=backdrop.dataset.pendingResult||notice.status||'Nuevo';
+      if(scheduleButton&&status!=='Sale')return;
+      let reason=null;
+      if(status==='No sale'){
+        const filter=backdrop.dataset.pendingStatus||'Nuevo';
+        close();
+        reason=await requestNoSaleReason(notice.management_reason||'');
+        if(reason===null){openPendingNotices(filter);const restored=$('.pending-modal-backdrop');if(restored)renderPendingNoticeDetail(restored,id);return;}
+      }
       host.querySelectorAll('button').forEach(button=>button.disabled=true);
-      const scheduleButton=e.target.closest('[data-pending-schedule]');if(scheduleButton)scheduleButton.textContent='Guardando…';
-      const saved=await changeStatus(id,'Sale');
-      if(saved){close();await openAppointmentDialog(null,{notice_id:id});}
-      else if(backdrop.isConnected)renderPendingNoticeDetail(backdrop,id);
+      if(saveButton)saveButton.textContent='Guardando…';
+      if(scheduleButton)scheduleButton.textContent='Guardando…';
+      const saved=await changeStatus(id,status,reason);
+      if(saved){
+        if(scheduleButton&&status==='Sale'){close();toast('Aviso sacado. Puedes completar la cita.','Aviso actualizado');await openAppointmentDialog(null,{notice_id:id});}
+        else {toast(status==='Sale'?'Aviso marcado como sacado.':status==='No sale'?'Aviso marcado como no sacado.':'Aviso guardado como pendiente.','Gestión actualizada');if(backdrop.isConnected)renderPendingNoticeList(backdrop);}
+      } else if(backdrop.isConnected)renderPendingNoticeDetail(backdrop,id);
       return;
     }
     const action=e.target.closest('[data-pending-status]');
@@ -749,17 +768,20 @@ function renderPendingNoticeDetail(backdrop,id) {
   const n=notices.find(item=>item.id===id);if(!n)return;
   const host=$('.pending-content',backdrop);if(!host)return;
   backdrop.dataset.pendingNoticeId=id;
+  backdrop.dataset.pendingResult=n.status||'Nuevo';
   const origin=n.created_by?'Teléfono':landingName(n.landing_id);
   const extras=Object.entries(n.custom_fields||{}).filter(([key])=>!['customer_name','phone','email','locality','postal_code','device','brand','issue'].includes(key)).map(([key,value])=>pendingDetailRow(fields.find(f=>f.field_key===key)?.label||key,value,false)).join('');
   const canManage=canManageCurrentNotices();
-  host.innerHTML='<button type="button" class="pending-back" data-pending-back>‹ Volver a pendientes</button><div class="pending-detail-grid">'
+  const resultControl='<label class="pending-result-select field"><span>Resultado de la llamada</span><select data-pending-result '+(canManage?'':'disabled')+'><option value="Nuevo" '+((n.status||'Nuevo')==='Nuevo'?'selected':'')+'>Pendiente</option><option value="Sale" '+(n.status==='Sale'?'selected':'')+'>Aviso sacado</option><option value="No sale" '+(n.status==='No sale'?'selected':'')+'>Aviso no sacado</option></select></label>';
+  const resultActions='<div class="pending-status-actions"><button type="button" class="outline-btn" data-pending-save '+(canManage?'':'disabled')+'>Guardar aviso</button><button type="button" class="primary-btn" data-pending-schedule '+(n.status==='Sale'&&canManage?'':'hidden')+' '+(canManage?'':'disabled')+'>Guardar y agendar</button></div>';
+  host.innerHTML='<button type="button" class="pending-back" data-pending-back>‹ Volver a avisos</button><div class="pending-detail-grid">'
     +pendingDetailRow('Cliente',n.customer_name,false)+pendingDetailRow('Teléfono',n.phone,false)
     +pendingDetailRow('Correo',n.email,false)+pendingDetailRow('Origen',origin,false)
     +pendingDetailRow('Aparato',n.device,false)+pendingDetailRow('Localidad',n.locality,false)
     +pendingDetailRow('Código postal',n.postal_code,false)+pendingDetailRow('Marca',n.brand,false)
     +pendingDetailRow('Recibido',formatDate(n.received_at),false)+pendingDetailRow('Avería',n.issue,true)
     +(n.status==='No sale'?pendingDetailRow('Motivo por el que no salió',n.management_reason||'Motivo no indicado',true):'')+extras
-    +'</div><div class="pending-status-actions">'+(canManageCurrentNotices()?'<button type="button" class="outline-btn" data-pending-edit>Editar datos</button>':'')+(isSuperAdmin?'<button type="button" class="outline-btn pending-delete" data-pending-delete>Eliminar aviso</button>':'')+'<button type="button" class="outline-btn" data-pending-status="No sale" '+(canManage?'':'disabled')+'>Aviso no sacado</button>'+(n.landing_id&&n.notice_type==='aviso'?'<button type="button" class="outline-btn" data-pending-status="Sale" '+(canManage?'':'disabled')+'>Aviso sacado sin agendar</button><button type="button" class="primary-btn" data-pending-schedule '+(canManage?'':'disabled')+'>Aviso sacado y agendar</button>':'<button type="button" class="primary-btn" data-pending-status="Sale" '+(canManage?'':'disabled')+'>Aviso sacado</button>')+'</div>'
+    +'</div>'+resultControl+resultActions
     +(canManage?'':'<p class="pending-hint">Tu perfil puede consultar los datos, pero no cambiar el estado.</p>');
 }
 function setupDate(prefix) {
