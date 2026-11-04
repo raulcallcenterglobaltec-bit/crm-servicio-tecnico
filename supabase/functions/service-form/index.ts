@@ -6,8 +6,29 @@ function categoryFor(device: string) {
 function text(value: unknown, max = 500) { return String(value ?? '').trim().slice(0, max) }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
-  if (req.method !== 'POST') return json({ error: 'Envía el formulario mediante POST.' }, 405)
+  const methods = { ...corsHeaders, 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' }
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: methods })
+  if (req.method === 'GET') {
+    try {
+      const landingKey = text(new URL(req.url).searchParams.get('landing_key'), 200)
+      if (!landingKey) return json({ error: 'Falta la clave de la landing.' }, 400, { 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' })
+      const admin = adminClient()
+      const { data: landing, error: landingError } = await admin.from('landings').select('id,company_id,name,is_active').eq('endpoint_key', landingKey).maybeSingle()
+      if (landingError) throw landingError
+      if (!landing || !landing.is_active) return json({ error: 'Landing no encontrada o desactivada.' }, 404, { 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' })
+      const [{ data: fieldRows, error: fieldsError }, { data: company, error: companyError }] = await Promise.all([
+        admin.from('notice_fields').select('field_key,label,field_type,options,required,position,landing_id').eq('company_id', landing.company_id).eq('channel', 'landing').eq('visible_in_form', true).order('position', { ascending: true }),
+        admin.from('companies').select('name,primary_color,logo_path').eq('id', landing.company_id).maybeSingle(),
+      ])
+      if (fieldsError) throw fieldsError
+      if (companyError) throw companyError
+      const fields = (fieldRows || []).filter(field => !field.landing_id || field.landing_id === landing.id).map(({ field_key, label, field_type, options, required, position }) => ({ field_key, label, field_type, options, required, position }))
+      return json({ landing: { name: landing.name }, company: company || { name: '', primary_color: '#5267e8', logo_path: null }, fields }, 200, { 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Cache-Control': 'no-store' })
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : 'No se pudo cargar el formulario.' }, 400, { 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' })
+    }
+  }
+  if (req.method !== 'POST') return json({ error: 'Envía el formulario mediante POST.' }, 405, { 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' })
   try {
     const body = await req.json()
     if (text(body?.honeypot, 200)) return json({ ok: true })
@@ -28,7 +49,9 @@ Deno.serve(async (req) => {
     const customerName = text(lookup('customer_name','name'), 160)
     const phone = text(lookup('phone','telephone'), 60)
     const device = text(lookup('device','appliance'), 120)
-    const missing = activeFields.filter(f => f.required && !text(input[f.field_key] ?? (f.field_key === 'customer_name' ? customerName : f.field_key === 'phone' ? phone : f.field_key === 'device' ? device : ''), 1000)).map(f => f.label)
+    const missing = activeFields.filter(f => f.required && (f.field_type === 'checkbox'
+      ? input[f.field_key] !== true
+      : !text(input[f.field_key] ?? (f.field_key === 'customer_name' ? customerName : f.field_key === 'phone' ? phone : f.field_key === 'device' ? device : ''), 1000))).map(f => f.label)
     if (!customerName || !phone || missing.length) return json({ error: 'Completa los campos obligatorios: ' + [...new Set(['customerName','phone',...missing])].join(', ') }, 400)
     const known = new Set(['customer_name','name','phone','telephone','email','locality','postal_code','device','appliance','brand','issue','problem','message'])
     const customFields: Record<string,unknown> = {}
