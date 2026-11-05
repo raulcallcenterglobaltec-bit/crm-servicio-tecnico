@@ -15,7 +15,7 @@ Deno.serve(async (req) => {
     if (['get_routes', 'save_routes', 'save_landing_routes'].includes(action)) {
       const { data: rows, error: rowsError } = await admin.from('company_integrations').select('kind,enabled,encrypted_config').eq('company_id', company_id)
       if (rowsError) throw rowsError
-      const routeTypes = ['form','phone','complaint'] as const
+      const routeTypes = ['form','phone','complaint','cancellation'] as const
       const channelTypes = ['telegram','whatsapp','email'] as const
       if (action === 'save_landing_routes') {
         if (typeof landing_id !== 'string' || !Array.isArray(landing_channels) || landing_channels.some((value: string) => !channelTypes.includes(value as any))) return json({ error: 'Landing o canales no válidos.' }, 400)
@@ -50,8 +50,8 @@ Deno.serve(async (req) => {
           for (const [id, kinds] of Object.entries(current.landing_routes || {})) if (Array.isArray(kinds)) landingRoutes[id] = kinds as string[]
         }
         const channels = enabledRows.map(x => x.kind)
-        const saved: Record<string,string[]> = { form: [], phone: [], complaint: [] }
-        const blocked: Record<string,string[]> = { form: [], phone: [], complaint: [] }
+        const saved: Record<string,string[]> = { form: [], phone: [], complaint: [], cancellation: [] }
+        const blocked: Record<string,string[]> = { form: [], phone: [], complaint: [], cancellation: [] }
         const targets: Record<string,Record<string,unknown>> = Object.fromEntries(routeTypes.map(type => [type, {}]))
         for (const row of enabledRows) {
           const current = await decryptConfig(row.encrypted_config)
@@ -59,9 +59,11 @@ Deno.serve(async (req) => {
             let target = integrationDestination(current, row.kind, type)
             if (row.kind === 'email') target = Array.isArray(target) ? target.join(', ') : (target || '')
             targets[type][row.kind] = target || ''
-            const legacyDefault = row.kind === 'telegram' ? !!(type === 'complaint' ? current.complaint_chat_id : current.chat_id) : !!current.to
+            const legacyDefault = row.kind === 'telegram'
+              ? !!(type === 'complaint' || type === 'cancellation' ? (current[`${type}_chat_id`] || current.complaint_chat_id || current.chat_id) : current.chat_id)
+              : !!(type === 'complaint' || type === 'cancellation' ? (current[`${type}_to`] || current.complaint_to || current.to) : current.to)
             const selected = current.routes
-              ? Array.isArray(current.routes[type]) && current.routes[type].includes(row.kind)
+              ? Array.isArray(current.routes[type]) ? current.routes[type].includes(row.kind) : type === 'cancellation' && Array.isArray(current.routes.complaint) && current.routes.complaint.includes(row.kind)
               : legacyDefault
             const hasTarget = Array.isArray(target) ? target.length > 0 : !!target
             if (selected && hasTarget) saved[type].push(row.kind)
@@ -82,7 +84,7 @@ Deno.serve(async (req) => {
           let target: string | string[] = typeof raw === 'string' ? raw.trim() : ''
           if (channel === 'email') {
             target = (typeof raw === 'string' ? raw.split(',') : Array.isArray(raw) ? raw : []).map((value: unknown) => String(value).trim()).filter(Boolean)
-            if ((routes[type] as string[]).includes(channel) && (!target.length || target.some((email: string) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))) return json({ error: `Indica un correo válido para ${type === 'form' ? 'avisos de formulario' : type === 'phone' ? 'avisos telefónicos' : 'reclamaciones o anulaciones'}.` }, 400)
+            if ((routes[type] as string[]).includes(channel) && (!target.length || target.some((email: string) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))) return json({ error: `Indica un correo válido para ${type === 'form' ? 'avisos de formulario' : type === 'phone' ? 'avisos telefónicos' : type === 'complaint' ? 'reclamaciones' : 'anulaciones'}.` }, 400)
           } else if (channel === 'whatsapp') {
             target = String(target).replace(/\D/g, '')
             if ((routes[type] as string[]).includes(channel) && !/^\d{8,15}$/.test(target as string)) return json({ error: `Indica el número de WhatsApp con prefijo internacional para ${type === 'form' ? 'avisos de formulario' : type === 'phone' ? 'avisos telefónicos' : 'reclamaciones o anulaciones'}.` }, 400)
@@ -124,7 +126,7 @@ Deno.serve(async (req) => {
       const current = await decryptConfig(row.encrypted_config)
       Object.assign(inheritedLandingRoutes, current.landing_routes || {})
     }
-    const savedRoutes = previous?.routes || (previous ? { form: [kind], phone: [kind], complaint: [kind] } : { form: [], phone: [], complaint: [] })
+    const savedRoutes = previous?.routes || (previous ? { form: [kind], phone: [kind], complaint: [kind], cancellation: [kind] } : { form: [], phone: [], complaint: [], cancellation: [] })
     const encrypted_config = await encryptConfig({ ...(previous || {}), ...config, routes: savedRoutes, landing_routes: { ...inheritedLandingRoutes, ...(previous?.landing_routes || {}) } })
     const { error } = await admin.from('company_integrations').upsert({ company_id, kind, enabled: !!enabled, encrypted_config, updated_at: new Date().toISOString() }, { onConflict: 'company_id,kind' })
     if (error) throw error
