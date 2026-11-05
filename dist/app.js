@@ -680,11 +680,25 @@ async function sendNoticeToConfiguredIntegrations(notice) {
 }
 function showDetails(id) {
   const n=notices.find(x=>x.id===id);if(!n)return;
-  const custom=Object.entries(n.custom_fields||{}).map(([k,v])=>`${fields.find(f=>f.field_key===k)?.label||k}: ${v}`).join('\n');
   const sourceLabel=n.created_by?'Teléfono':landingName(n.landing_id);
   const typeLabel=n.notice_type==='anulacion'?'Anulación':n.notice_type==='reclamacion'?'Reclamación':'Aviso técnico';
   const resultLabel=n.notice_type==='aviso'?statusLabel(n.status):n.status==='Sale'?'Envío solicitado':n.status==='No sale'?'No es nuestra (cliente equivocado)':'Registro anterior';
-  infoDialog('Detalle del registro',`Tipo: ${typeLabel}\nCliente: ${n.customer_name}\nTeléfono: ${n.phone}\nCorreo: ${n.email||'—'}\nAparato: ${n.device||'—'}\nOrigen: ${sourceLabel}\nResultado: ${resultLabel}\nRecibido: ${formatDate(n.received_at)}\nLocalidad: ${n.locality||'—'}\nCódigo postal: ${n.postal_code||'—'}\nMarca: ${n.brand||'—'}\nDetalle: ${n.issue||'—'}\nMotivo por el que no salió: ${n.status==='No sale'?(n.management_reason||'Motivo no indicado'):'—'}\n${custom}`);
+  const statusTone=n.status==='Sale'?'success':n.status==='No sale'?'danger':n.status==='Pendiente de localizar'?'pending':'new';
+  const item=(label,value)=>'<div class="record-detail-item"><span>'+esc(label)+'</span><strong>'+esc(value===null||value===undefined||value===''?'—':String(value))+'</strong></div>';
+  const custom=Object.entries(n.custom_fields||{}).filter(([,value])=>value!==null&&value!==undefined&&value!=='').map(([key,value])=>item(fields.find(f=>f.field_key===key)?.label||key,value)).join('');
+  const backdrop=document.createElement('div');backdrop.className='modal-backdrop open record-detail-backdrop';
+  backdrop.innerHTML='<div class="modal record-detail-modal" role="dialog" aria-modal="true" aria-labelledby="recordDetailTitle">'+
+    '<div class="modal-head"><div><div class="record-detail-eyebrow">'+esc(typeLabel)+'</div><h2 id="recordDetailTitle">Detalle del registro</h2></div><button class="close" type="button" aria-label="Cerrar">×</button></div>'+
+    '<div class="record-detail-summary"><div><span>Cliente</span><strong>'+esc(n.customer_name||'Sin nombre')+'</strong></div><span class="record-detail-status '+statusTone+'">'+esc(resultLabel)+'</span></div>'+
+    '<section class="record-detail-section"><h3>Datos del cliente</h3><div class="record-detail-grid">'+item('Teléfono',n.phone)+item('Correo',n.email)+item('Localidad',n.locality)+item('Código postal',n.postal_code)+'</div></section>'+
+    '<section class="record-detail-section"><h3>Datos del aviso</h3><div class="record-detail-grid">'+item('Aparato',n.device)+item('Marca',n.brand)+item('Origen',sourceLabel)+item('Recibido',formatDate(n.received_at))+'</div></section>'+
+    '<section class="record-detail-section"><h3>Detalle</h3><div class="record-detail-description">'+esc(n.issue||'Sin detalle indicado')+'</div>'+
+      (n.status==='No sale'?'<div class="record-detail-reason"><span>Motivo por el que no salió</span><strong>'+esc(n.management_reason||'Motivo no indicado')+'</strong></div>':'')+'</section>'+
+    (custom?'<section class="record-detail-section"><h3>Otros datos</h3><div class="record-detail-grid">'+custom+'</div></section>':'')+
+    '<div class="modal-actions"><button class="primary-btn" type="button">Cerrar</button></div></div>';
+  document.body.append(backdrop);
+  $$('.close,.primary-btn',backdrop).forEach(button=>button.onclick=()=>backdrop.remove());
+  backdrop.onclick=event=>{if(event.target===backdrop)backdrop.remove();};
 }
 function installPendingUi() {
   if(!$('#pendingUiStyles')) {
