@@ -1137,13 +1137,6 @@ async function renderSettings() {
     if(!file){file=document.createElement('input');file.type='file';file.accept='image/png,image/jpeg,image/webp,image/svg+xml';file.id='logoFile';file.style='position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none';file.setAttribute('aria-label','Seleccionar archivo de logo');article.append(file);}
     if(!button){button=document.createElement('button');button.id='uploadLogo';button.className='outline-btn';button.textContent='Subir logo';article.append(button);}
     button.onclick=()=>file.click();file.onchange=uploadLogo;
-    let sizeControl=$('[data-logo-size-control]',article);
-    if(!sizeControl){
-      sizeControl=document.createElement('label');sizeControl.dataset.logoSizeControl='true';
-      sizeControl.style='display:block;margin-top:16px;max-width:420px';
-      sizeControl.innerHTML='<span style="display:block;font-weight:600;margin-bottom:6px">Tamaño del logo en el menú</span><input type="range" min="36" max="96" step="4" data-logo-size-slider style="width:100%"/><small data-logo-size-value style="color:#687488"></small>';
-      article.insertBefore(sizeControl,$('#saveSettings',article));
-    }
     const sizeSlider=$('[data-logo-size-slider]',article),sizeValue=$('[data-logo-size-value]',article);
     if(sizeSlider){
       sizeSlider.value=String(Math.max(36,Math.min(96,Number(currentCompany.logo_size)||36)));
