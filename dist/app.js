@@ -1816,10 +1816,11 @@ function collapseSettingsPanels() {
 function showPage(name) {
   if(name!=='configuracion')collapseSettingsPanels();
   if(!isSuperAdmin&&!['avisos-landing','avisos-phone','informes','reclamaciones','anulaciones','historial','agenda'].includes(name))return;
-  closeMobileMenu(false);
+  closeMobileMore(false);
   const pageName=(name==='avisos-landing'||name==='avisos-phone')?'avisos':name;
   $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+pageName));
-  $$('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
+  $('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
+  document.querySelectorAll('#mobileNav [data-page],#mobileMorePanel [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
   const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',reclamaciones:'Reclamaciones',anulaciones:'Anulaciones',historial:'Historial de clientes',agenda:'Agenda - Citas',empresas:'Empresas',usuarios:'Usuarios y permisos',personalizacion:'Personalización',configuracion:'Configuración',integraciones:'Integraciones'};
   $('#breadcrumb').textContent='Panel / '+labels[name];
   if(pageName==='avisos'){
@@ -1837,31 +1838,29 @@ function showPage(name) {
   if(pageName==='agenda')renderAgenda();
   $('#sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'});
 }
-let mobileMenuScrollY=0;
-function openMobileMenu() {
+let mobileMoreScrollY=0;
+function openMobileMore() {
   if(!window.matchMedia('(max-width:760px)').matches)return;
-  const sidebar=$('#sidebar'),toggle=$('#menuToggle'),backdrop=$('#menuBackdrop');
-  if(!sidebar||sidebar.classList.contains('open'))return;
-  mobileMenuScrollY=window.scrollY;
+  const panel=$('#mobileMorePanel'),backdrop=$('#mobileMoreBackdrop'),toggle=$('#mobileMoreToggle');
+  if(!panel||!panel.hidden)return;
+  mobileMoreScrollY=window.scrollY;
   document.body.style.position='fixed';
-  document.body.style.top=`-${mobileMenuScrollY}px`;
+  document.body.style.top=`-${mobileMoreScrollY}px`;
   document.body.style.width='100%';
-  document.body.classList.add('mobile-menu-open');
-  sidebar.classList.add('open');
+  document.body.classList.add('mobile-more-open');
+  panel.hidden=false;panel.classList.add('open');
   if(backdrop)backdrop.hidden=false;
-  if(toggle){toggle.textContent='×';toggle.setAttribute('aria-expanded','true');toggle.setAttribute('aria-label','Cerrar menú');}
+  if(toggle){toggle.setAttribute('aria-expanded','true');toggle.setAttribute('aria-label','Cerrar menú de apartados');}
 }
-function closeMobileMenu(restoreScroll=true) {
-  const sidebar=$('#sidebar'),toggle=$('#menuToggle'),backdrop=$('#menuBackdrop');
-  if(!sidebar?.classList.contains('open'))return;
-  sidebar.classList.remove('open');
+function closeMobileMore(restoreScroll=true) {
+  const panel=$('#mobileMorePanel'),backdrop=$('#mobileMoreBackdrop'),toggle=$('#mobileMoreToggle');
+  if(!panel||panel.hidden)return;
+  panel.classList.remove('open');panel.hidden=true;
   if(backdrop)backdrop.hidden=true;
-  document.body.classList.remove('mobile-menu-open');
-  document.body.style.position='';
-  document.body.style.top='';
-  document.body.style.width='';
-  if(toggle){toggle.textContent='☰';toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-label','Abrir menú');}
-  if(restoreScroll)window.scrollTo(0,mobileMenuScrollY);
+  document.body.classList.remove('mobile-more-open');
+  document.body.style.position='';document.body.style.top='';document.body.style.width='';
+  if(toggle){toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-label','Mostrar más apartados');}
+  if(restoreScroll)window.scrollTo(0,mobileMoreScrollY);
 }
 function wireUI() {
   installPendingUi();
@@ -1891,10 +1890,13 @@ function wireUI() {
   $('#modal').addEventListener('click',e=>{if(e.target.id==='modal')e.currentTarget.classList.remove('open');});
   $('#fPhone').addEventListener('input',()=>{duplicatePhoneBypass=null;});
   $('#noticeForm').addEventListener('submit',createNotice);
-  $('#menuToggle').addEventListener('click',()=>$('#sidebar').classList.contains('open')?closeMobileMenu(true):openMobileMenu());
-  $('#menuBackdrop').addEventListener('click',()=>closeMobileMenu(true));
-  document.addEventListener('keydown',event=>{if(event.key==='Escape')closeMobileMenu(true);});
-  window.addEventListener('resize',()=>{if(!window.matchMedia('(max-width:760px)').matches)closeMobileMenu(false);});
+  $('#mobileNav').addEventListener('click',event=>{const button=event.target.closest('button[data-page]');if(button)showPage(button.dataset.page);});
+  $('#mobileMoreLinks').addEventListener('click',event=>{const button=event.target.closest('button[data-page]');if(button)showPage(button.dataset.page);});
+  $('#mobileMoreToggle').addEventListener('click',()=>$('#mobileMorePanel').hidden?openMobileMore():closeMobileMore(true));
+  $('#mobileMoreClose').addEventListener('click',()=>closeMobileMore(true));
+  $('#mobileMoreBackdrop').addEventListener('click',()=>closeMobileMore(true));
+  document.addEventListener('keydown',event=>{if(event.key==='Escape')closeMobileMore(true);});
+  window.addEventListener('resize',()=>{if(!window.matchMedia('(max-width:760px)').matches)closeMobileMore(false);});
   $('#pendingLandingButton').addEventListener('click',openPendingNotices);
   $$('[data-notice-list]').forEach(card=>{
     card.addEventListener('click',()=>openPendingNotices(card.dataset.noticeList));
