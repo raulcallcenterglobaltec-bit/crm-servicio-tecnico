@@ -241,6 +241,8 @@ function renderCompanyBrand() {
   const brand=$('.brand');if(!brand)return;
   const mark=$('.brand-mark',brand),name=$('.brand small',brand);
   if(mark){
+    const logoSize=Math.max(36,Math.min(96,Number(currentCompany?.logo_size)||36));
+    mark.style.width=logoSize+'px';mark.style.height=logoSize+'px';mark.style.flex='0 0 '+logoSize+'px';mark.style.fontSize=Math.round(logoSize*.5)+'px';
     if(currentCompany?.logo_path)mark.innerHTML=`<img src="${esc(currentCompany.logo_path)}" alt="Logo de ${esc(currentCompany.name||'la empresa')}" style="width:100%;height:100%;object-fit:contain;border-radius:inherit;background:#fff;padding:3px"/>`;
     else mark.textContent=(currentCompany?.name||'T').trim().slice(0,1).toUpperCase();
   }
@@ -1135,6 +1137,19 @@ async function renderSettings() {
     if(!file){file=document.createElement('input');file.type='file';file.accept='image/png,image/jpeg,image/webp,image/svg+xml';file.id='logoFile';file.style='position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none';file.setAttribute('aria-label','Seleccionar archivo de logo');article.append(file);}
     if(!button){button=document.createElement('button');button.id='uploadLogo';button.className='outline-btn';button.textContent='Subir logo';article.append(button);}
     button.onclick=()=>file.click();file.onchange=uploadLogo;
+    let sizeControl=$('[data-logo-size-control]',article);
+    if(!sizeControl){
+      sizeControl=document.createElement('label');sizeControl.dataset.logoSizeControl='true';
+      sizeControl.style='display:block;margin-top:16px;max-width:420px';
+      sizeControl.innerHTML='<span style="display:block;font-weight:600;margin-bottom:6px">Tamaño del logo en el menú</span><input type="range" min="36" max="96" step="4" data-logo-size-slider style="width:100%"/><small data-logo-size-value style="color:#687488"></small>';
+      article.insertBefore(sizeControl,$('#saveSettings',article));
+    }
+    const sizeSlider=$('[data-logo-size-slider]',article),sizeValue=$('[data-logo-size-value]',article);
+    if(sizeSlider){
+      sizeSlider.value=String(Math.max(36,Math.min(96,Number(currentCompany.logo_size)||36)));
+      const updateLogoSizePreview=()=>{if(sizeValue)sizeValue.textContent=sizeSlider.value+' px';currentCompany.logo_size=Number(sizeSlider.value);renderCompanyBrand();};
+      sizeSlider.oninput=updateLogoSizePreview;updateLogoSizePreview();
+    }
   }
   renderFields();renderPriceRules();
 }
@@ -1142,9 +1157,10 @@ async function saveCompanySettings() {
   const article=$('#brandPanel');
   const color=$('input[type=color]',article)?.value||'#5267e8';
   const name=$('input',article)?.value?.trim()||currentCompany.name;
-  const {data,error}=await db.from('companies').update({name,primary_color:color}).eq('id',currentCompany.id).select().single();
-  if(error){applyCompanyTheme(currentCompany.primary_color);const colorInput=$('input[type=color]',article);if(colorInput)colorInput.value=currentCompany.primary_color||'#5267e8';toast(errorText(error),'Configuración no guardada');return;}
-  Object.assign(currentCompany,data);renderCompanyPicker();toast('Nombre y color guardados.');
+  const logoSize=Math.max(36,Math.min(96,Number($('[data-logo-size-slider]',article)?.value)||36));
+  const {data,error}=await db.from('companies').update({name,primary_color:color,logo_size:logoSize}).eq('id',currentCompany.id).select().single();
+  if(error){applyCompanyTheme(currentCompany.primary_color);const colorInput=$('input[type=color]',article);if(colorInput)colorInput.value=currentCompany.primary_color||'#5267e8';const sizeSlider=$('[data-logo-size-slider]',article);if(sizeSlider)sizeSlider.value=String(currentCompany.logo_size||36);renderCompanyBrand();toast(errorText(error),'Configuración no guardada');return;}
+  Object.assign(currentCompany,data);renderCompanyPicker();toast('Nombre, color y tamaño del logo guardados.');
 }
 async function uploadLogo(e) {
   const file=e.target.files?.[0];if(!file)return;
