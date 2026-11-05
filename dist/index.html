@@ -13,7 +13,26 @@
     @media(max-width:760px){.sidebar{width:230px;transform:translateX(-100%);transition:.22s;box-shadow:12px 0 30px #16203933}.sidebar.open{transform:translateX(0)}.workspace{margin-left:0}.topbar{height:62px;padding:0 14px}.mobile-menu{display:block}.crumb,.top-sep{display:none}.top-left{gap:9px}.company-select{padding:6px 8px;font-size:11px}.company-badge{width:24px;height:24px}.top-actions{gap:7px}.search{display:none}.user-meta{display:none}.content{padding:22px 14px 40px}.page-head{display:block}.head-actions{margin-top:15px;flex-wrap:wrap}.head-actions>*{flex:1}.date-filter-row{margin-top:-5px}.date-controls input{width:120px}.metrics{gap:9px}.metric{padding:13px;min-height:108px}.metric-value{font-size:23px}.metric-top{font-size:10px}.chart-grid{grid-template-columns:1fr}.chart-card{min-height:225px}.table-head{display:block}.filters{margin-top:12px;flex-wrap:wrap}.filters>*{flex:1}.filters input{width:100%}.simple-grid{grid-template-columns:1fr}.simple-card{min-width:0}.field-add{flex-wrap:wrap}.field-add input{flex:1 1 100%}.field-add select{width:auto;flex:1 1 calc(50% - 8px)}.field-add button{flex:1 1 100%}.page-head h1{font-size:22px}}
     @media(max-width:390px){.metrics{grid-template-columns:1fr 1fr}.metric-foot{font-size:10px}.head-actions{gap:6px}.head-actions button,.head-actions select{font-size:10px;padding:8px 7px}}
   .connection-error{margin:0 0 16px;padding:11px 14px;border:1px solid #f1c8cd;background:#fff2f3;color:#a12f40;border-radius:9px;font-size:13px;line-height:1.5}
-  </style>
+  
+.record-detail-modal{width:min(720px,calc(100vw - 28px));max-height:calc(100vh - 36px);overflow:auto;padding:24px}
+.record-detail-modal .modal-head{align-items:center;margin-bottom:14px}
+.record-detail-eyebrow{font-size:10px;font-weight:750;letter-spacing:.11em;text-transform:uppercase;color:var(--accent);margin-bottom:4px}
+.record-detail-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-radius:12px;background:var(--accent-soft);margin:0 0 16px}
+.record-detail-summary>div{display:grid;gap:2px;min-width:0}
+.record-detail-summary>div span,.record-detail-item>span,.record-detail-reason>span{font-size:10px;color:#7b8798;font-weight:650}
+.record-detail-summary>div strong{font-size:16px;overflow-wrap:anywhere}
+.record-detail-status{flex:none;border-radius:99px;padding:5px 10px;font-size:11px;font-weight:750;background:#eef0f5;color:#667185}
+.record-detail-status.success{background:#e6f6ef;color:#198d6d}.record-detail-status.danger{background:#fff0f2;color:#c34b5d}.record-detail-status.pending{background:#fff4dc;color:#a66611}.record-detail-status.new{background:#eef0ff;color:#5267e8}
+.record-detail-section{padding:14px 0;border-top:1px solid #edf0f5}
+.record-detail-section h3{margin:0 0 10px;font-size:12px;color:#334057}
+.record-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.record-detail-item{min-width:0;display:grid;gap:3px;padding:9px 11px;border-radius:9px;background:#f7f8fb}
+.record-detail-item strong{font-size:12px;font-weight:600;color:#25334a;overflow-wrap:anywhere;white-space:pre-wrap}
+.record-detail-description{padding:12px 13px;border-left:3px solid var(--accent);border-radius:8px;background:#f7f8fb;color:#334057;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+.record-detail-reason{display:grid;gap:4px;margin-top:9px;padding:11px 13px;border-radius:8px;background:#fff4dc;color:#775016}
+.record-detail-reason strong{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:560px){.record-detail-modal{padding:18px}.record-detail-grid{grid-template-columns:1fr}.record-detail-summary{align-items:flex-start;flex-direction:column}}
+</style>
 <style>
 #noticeTableView[hidden],#kanbanBoard[hidden],#cardFieldPanel[hidden]{display:none!important}
 .notice-view-tools{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:12px 17px;border-bottom:1px solid var(--line)}
@@ -231,6 +250,6 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline-color:var(
 <div class="modal-backdrop" id="modal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="modal-head"><div><h2 id="modalTitle">Añadir aviso</h2><p id="modalDescription">Completa los datos para registrar una solicitud.</p></div><button class="close" id="closeModal" aria-label="Cerrar">×</button></div><form id="noticeForm"><div class="field" id="recordTypeWrap" style="margin-bottom:12px"><label for="fRecordType">Tipo de llamada</label><select id="fRecordType"><option value="aviso">Aviso técnico</option><option value="reclamacion">Reclamación</option><option value="anulacion">Anulación</option></select></div><div class="form-grid" id="noticeFieldsGrid"><div class="field" data-field-code="name"><label for="fName">Nombre y apellidos</label><input id="fName" required placeholder="Nombre del cliente"/></div><div class="field" data-field-code="phone"><label for="fPhone">Teléfono</label><input id="fPhone" required placeholder="600 000 000"/><small id="relatedNoticeHint" class="notice-match" hidden></small></div><div class="field" data-field-code="locality"><label for="fLocality">Localidad</label><input id="fLocality" placeholder="Localidad"/></div><div class="field" data-field-code="postal"><label for="fPostal">Código postal</label><input id="fPostal" placeholder="Código postal"/></div><div class="field" data-field-code="address" hidden><label for="fAddress">Dirección</label><input id="fAddress" placeholder="Dirección"/></div><div class="field" data-field-code="device"><label for="fDevice">Aparato</label><select id="fDevice"><option>Aire acondicionado</option><option>Lavadora</option><option>Lavavajillas</option><option>Secadora</option><option>Termo eléctrico</option><option>Caldera</option><option>Otro</option></select></div><div class="field" data-field-code="brand"><label for="fBrand">Marca del aparato</label><input id="fBrand" placeholder="Marca (opcional)"/></div><div class="field full" data-field-code="issue"><label id="fIssueLabel" for="fIssue">Avería o comentario</label><textarea id="fIssue" rows="3" placeholder="Describe brevemente el problema"></textarea></div></div><div class="field" id="statusFieldWrap" style="margin-top:12px"><label id="fStatusLabel" for="fStatus">Resultado del aviso</label><select id="fStatus"><option value="Nuevo">Pendiente</option><option value="Sale">Aviso Sacado</option><option value="No sale">Aviso Nulo</option></select></div><div id="extraNoticeFields" hidden></div><div class="modal-actions"><button type="button" class="outline-btn" id="cancelModal">Cancelar</button><button class="primary-btn" id="saveNotice" type="submit">Guardar aviso</button><button class="outline-btn" id="saveAndSchedule" type="submit" hidden>Guardar y agendar</button></div></form></div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
 <script src="supabase-config.js"></script>
-<script src="app.js?v=20261105-61"></script>
+<script src="app.js?v=20261105-62"></script>
 </body>
 </html>
