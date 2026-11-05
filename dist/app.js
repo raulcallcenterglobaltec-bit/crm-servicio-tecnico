@@ -27,7 +27,7 @@ function toast(message, title='Aviso') {
   el.querySelector('strong').textContent=title; el.querySelector('p').textContent=message;
   el.classList.add('show'); clearTimeout(window.toastTimer); window.toastTimer=setTimeout(()=>el.classList.remove('show'),5200);
 }
-function formDialog({title,description='',fields=[],confirmText='Guardar'}) {
+function formDialog({title,description='',fields=[],confirmText='Guardar',className=''}) {
   return new Promise(resolve=>{
     const backdrop=document.createElement('div');backdrop.className='modal-backdrop open';const highestBackdropZ=[...document.querySelectorAll('.modal-backdrop')].reduce((max,el)=>Math.max(max,Number(el.style.zIndex)||0),110);backdrop.style.zIndex=String(Math.max(120,highestBackdropZ+10));
     const controls=fields.map(f=>{
@@ -44,11 +44,11 @@ function formDialog({title,description='',fields=[],confirmText='Guardar'}) {
       else if(f.type==='checkbox')control=`<input name="${key}" type="checkbox" style="width:16px;height:16px;padding:0;margin:0;flex:0 0 16px;accent-color:var(--accent)" ${f.value?'checked':''} ${required}/>`;
       else if(f.type==='file')control=`<input name="${key}" type="file" accept="${esc(f.accept||'')}" ${required}/>`;
       else control=`<input name="${key}" type="${esc(f.type||'text')}" value="${value}" ${required} placeholder="${esc(f.placeholder||'')}" ${f.autocomplete?`autocomplete="${esc(f.autocomplete)}"`:''}/>`;
-      if(f.type==='action')return `<div class="field" style="margin:12px 0">${control}</div>`;
+      if(f.type==='action')return `<div class="field" data-dialog-field="${key}" style="margin:12px 0">${control}</div>`;
       if(f.type==='checkbox')return `<label class="field" style="display:flex;align-items:center;gap:9px;margin:12px 0">${control}<span style="margin:0">${label}</span></label>`;
-      return `<label class="field" style="margin:12px 0"><span>${label}</span>${control}</label>`;
+      return `<label class="field" data-dialog-field="${key}" style="margin:12px 0"><span>${label}</span>${control}</label>`;
     }).join('');
-    backdrop.innerHTML=`<form class="modal" style="max-height:90vh;overflow:auto" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>${esc(title)}</h2><p>${esc(description)}</p></div><button class="close" type="button" data-dialog-cancel aria-label="Cerrar">×</button></div>${controls}<div class="modal-actions"><button class="outline-btn" type="button" data-dialog-cancel>Cancelar</button><button class="primary-btn" type="submit">${esc(confirmText)}</button></div></form>`;
+    backdrop.innerHTML=`<form class="modal ${esc(className)}" style="max-height:90vh;overflow:auto" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>${esc(title)}</h2><p>${esc(description)}</p></div><button class="close" type="button" data-dialog-cancel aria-label="Cerrar">×</button></div>${controls}<div class="modal-actions"><button class="outline-btn" type="button" data-dialog-cancel>Cancelar</button><button class="primary-btn" type="submit">${esc(confirmText)}</button></div></form>`;
     const finish=value=>{backdrop.remove();resolve(value);};
     backdrop.addEventListener('click',e=>{const target=e.target;if(target===backdrop||(target instanceof Element&&target.closest('[data-dialog-cancel]'))){e.preventDefault();e.stopPropagation();finish(null);}});
     $('form',backdrop).addEventListener('submit',e=>{e.preventDefault();const result={};for(const f of fields){if(f.type==='action')continue;const el=$('[name="'+CSS.escape(f.key)+'"]',backdrop);if(f.type==='search-select'&&!el.value){const search=$('[data-search-select-input="'+CSS.escape(f.key)+'"]',backdrop);search.setCustomValidity('Selecciona un cliente de la lista.');search.reportValidity();search.focus();return;}result[f.key]=f.type==='checkbox'?el.checked:f.type==='number'?Number(el.value):f.type==='file'?(el.files?.[0]||null):el.value;}finish(result);});
@@ -1555,10 +1555,11 @@ async function openAppointmentDialog(existing=null,overrides={}) {
       {key:'status',label:'Estado',type:'select',value:overrides.status||((source.status==='cancelled')?'scheduled':source.status||'scheduled'),options:[{value:'scheduled',label:'Programada'},{value:'completed',label:'Realizada'}]}
     ];
   const answer=await formDialog({
-    title:existing?'Editar cita':'Agendar cita',
-    description:isFree?'Completa los datos de la cita.':'Elige un aviso sacado. El cliente y su teléfono se completan desde ese aviso.',
+    title:existing?'Editar cita':isFree?'Cita personal':'Cita cliente',
+    description:isFree?'Reserva un hueco para una tarea personal o interna.':'Selecciona el aviso del cliente. Sus datos se completan desde ese aviso.',
     fields:appointmentFields,
-    confirmText:'Guardar cita'
+    confirmText:'Guardar cita',
+    className:'agenda-form-dialog'
   });
   if(!answer)return;
   const selectedNotice=isFree?null:eligible.find(n=>n.id===answer.notice_id);
@@ -1605,7 +1606,7 @@ function openFreeSlotsDialog(parentBackdrop,ignoreAppointmentId=null) {
   const initialDate=parentStart?.value?.slice(0,10)||agendaSelectedDate||localDateKey(new Date());
   const backdrop=document.createElement('div');backdrop.className='modal-backdrop open';
   const highest=[...document.querySelectorAll('.modal-backdrop')].reduce((max,el)=>Math.max(max,Number(el.style.zIndex)||0),110);backdrop.style.zIndex=String(highest+10);
-  backdrop.innerHTML=`<section class="modal" role="dialog" aria-modal="true" style="max-height:88vh;overflow:auto"><div class="modal-head"><div><h2>Huecos libres</h2><p>Selecciona una fecha y elige una hora disponible entre las 08:00 y las 20:00.</p></div><button type="button" class="close" data-free-slots-close aria-label="Cerrar">×</button></div><label class="field"><span>Fecha</span><input type="date" data-free-slots-date value="${esc(initialDate)}"/></label><p style="font-size:12px;color:#778398">Duración de la cita: ${duration} minutos</p><div data-free-slots-list style="display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px"></div><div class="modal-actions"><button type="button" class="outline-btn" data-free-slots-close>Cerrar</button></div></section>`;
+  backdrop.innerHTML=`<section class="modal agenda-slots-dialog" role="dialog" aria-modal="true" style="max-height:88vh;overflow:auto"><div class="modal-head"><div><h2>Huecos libres</h2><p>Selecciona una fecha y elige una hora disponible entre las 08:00 y las 20:00.</p></div><button type="button" class="close" data-free-slots-close aria-label="Cerrar">×</button></div><label class="field"><span>Fecha</span><input type="date" data-free-slots-date value="${esc(initialDate)}"/></label><p style="font-size:12px;color:#778398">Duración de la cita: ${duration} minutos</p><div data-free-slots-list style="display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px"></div><div class="modal-actions"><button type="button" class="outline-btn" data-free-slots-close>Cerrar</button></div></section>`;
   const dateInput=$('[data-free-slots-date]',backdrop),list=$('[data-free-slots-list]',backdrop);
   const render=()=>{
     const dateKey=dateInput.value;
