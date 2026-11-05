@@ -65,18 +65,23 @@ export async function decryptConfig(value: string) {
 }
 
 
-export function integrationDestination(config: Record<string,any>, kind: string, eventType: 'form' | 'phone' | 'complaint') {
+export function integrationDestination(config: Record<string,any>, kind: string, eventType: 'form' | 'phone' | 'complaint' | 'cancellation') {
   const key = kind === 'telegram' ? `${eventType}_chat_id` : `${eventType}_to`
   if (Object.prototype.hasOwnProperty.call(config, key)) return config[key]
+  if (eventType === 'cancellation') {
+    const legacyKey = kind === 'telegram' ? 'complaint_chat_id' : 'complaint_to'
+    const fallback = kind === 'telegram' ? config.chat_id : config.to
+    return config[legacyKey] || fallback
+  }
   if (kind === 'telegram') return eventType === 'complaint' ? (config.complaint_chat_id || config.chat_id) : config.chat_id
-  return config.to
+  return eventType === 'complaint' ? (config.complaint_to || config.to) : config.to
 }
 
 function htmlEscape(text: string) {
   return text.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!))
 }
 
-export async function sendNoticeNotifications(admin: SupabaseClient, companyId: string, notice: Record<string,any>, landingName: string, test = false, onlyKind?: string, eventType: 'form' | 'phone' | 'complaint' = 'form') {
+export async function sendNoticeNotifications(admin: SupabaseClient, companyId: string, notice: Record<string,any>, landingName: string, test = false, onlyKind?: string, eventType: 'form' | 'phone' | 'complaint' | 'cancellation' = 'form') {
   const { data, error } = await admin.from('company_integrations').select('kind,enabled,encrypted_config').eq('company_id', companyId).eq('enabled', true)
   if (error) throw error
   const results: { kind: string; ok: boolean; error?: string }[] = []
@@ -88,13 +93,13 @@ export async function sendNoticeNotifications(admin: SupabaseClient, companyId: 
       if (!test && hasLandingRoute && (!Array.isArray(landingRoutes[notice.landing_id]) || !landingRoutes[notice.landing_id].includes(item.kind))) continue
       if (!test && !hasLandingRoute && config.routes && (!Array.isArray(config.routes[eventType]) || !config.routes[eventType].includes(item.kind))) continue
       const time = new Date().toLocaleString('es-ES',{timeZone:'Europe/Madrid',dateStyle:'short',timeStyle:'short'})
-      const isCancellation = notice.notice_type === 'anulacion'
+      const isCancellation = eventType === 'cancellation' || notice.notice_type === 'anulacion'
       const isComplaint = eventType === 'complaint'
       const title = test ? 'Prueba de CRM Gestión de avisos' : isCancellation ? 'Nueva anulación telefónica' : isComplaint ? 'Nueva reclamación telefónica' : 'Nuevo aviso recibido'
       const originLabel = isComplaint ? 'Origen: Teléfono' : eventType === 'form' ? `Origen: ${landingName}` : 'Origen: Teléfono'
       const message = test ? 'La conexión de notificaciones está funcionando.' : `${title}\n${originLabel}\nHora: ${time}\nCliente: ${notice.customer_name || '—'}\nTeléfono: ${notice.phone || '—'}${eventType === 'form' ? `\nLocalidad: ${notice.locality || '—'}\nAparato: ${notice.device || '—'}\nAvería: ${notice.issue || '—'}` : `\nDetalle: ${notice.issue || '—'}`}`
       const destination = integrationDestination(config, item.kind, eventType)
-      if (!test && (destination == null || destination === '' || (Array.isArray(destination) && !destination.length))) throw new Error(`Configura el destino de ${eventType === 'form' ? 'formularios' : eventType === 'phone' ? 'avisos telefónicos' : 'reclamaciones o anulaciones'} para ${item.kind}.`)
+      if (!test && (destination == null || destination === '' || (Array.isArray(destination) && !destination.length))) throw new Error(`Configura el destino de ${eventType === 'form' ? 'formularios' : eventType === 'phone' ? 'avisos telefónicos' : eventType === 'complaint' ? 'reclamaciones' : 'anulaciones'} para ${item.kind}.`)
       if (item.kind === 'telegram') {
         const telegramChat = test ? (config.form_chat_id || config.chat_id) : destination
         const telegramText = message.split('\n').map(line => line === originLabel
