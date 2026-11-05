@@ -22,7 +22,7 @@
 .card-field-panel{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;padding:12px 17px;border-bottom:1px solid var(--line);background:#fbfcff}
 .card-field-panel label{display:flex;align-items:center;gap:7px;color:#58657a;font-size:11px}
 .card-field-panel input{accent-color:var(--accent)}
-.kanban-board{display:grid;grid-template-columns:repeat(3,minmax(230px,1fr));gap:12px;padding:14px;overflow:auto;align-items:start}
+.kanban-board{display:grid;grid-template-columns:repeat(4,minmax(230px,1fr));gap:12px;padding:14px;overflow:auto;align-items:start}
 .kanban-column{min-height:180px;padding:10px;border:1px dashed #dce1eb;border-radius:11px;background:#f8f9fc;transition:.15s}
 .kanban-column.drag-over{background:var(--accent-soft);border-color:var(--accent)}
 .kanban-column-head{display:flex;align-items:center;justify-content:space-between;margin:0 1px 10px;font-size:12px;font-weight:750;color:#455167}
@@ -42,7 +42,7 @@
 .notice-card-foot{display:flex;justify-content:space-between;align-items:center;gap:6px;padding-top:8px;border-top:1px solid #f0f1f5}
 .notice-card-foot select{max-width:145px;border:1px solid var(--line);border-radius:7px;background:#fff;padding:5px 7px;color:#58657a;font-size:10px}
 .notice-card-foot button{border:0;background:transparent;color:var(--accent);font-size:10px;font-weight:650}
-@media(max-width:900px){.kanban-board{grid-template-columns:repeat(3,minmax(250px,1fr))}}
+@media(max-width:1050px){.kanban-board{grid-template-columns:repeat(2,minmax(250px,1fr))}}
 @media(max-width:560px){.kanban-board{grid-template-columns:1fr;overflow:visible}.kanban-column{min-height:120px}.notice-view-tools{padding:10px 12px}}
 .settings-layout{display:grid;grid-template-columns:225px minmax(0,1fr);gap:16px;margin-top:16px;align-items:start}
 .settings-menu{display:grid;gap:12px;padding:0;background:transparent;border:0;border-radius:0;box-shadow:none;position:sticky;top:82px}
@@ -231,6 +231,6 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline-color:var(
 <div class="modal-backdrop" id="modal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="modal-head"><div><h2 id="modalTitle">Añadir aviso</h2><p id="modalDescription">Completa los datos para registrar una solicitud.</p></div><button class="close" id="closeModal" aria-label="Cerrar">×</button></div><form id="noticeForm"><div class="field" id="recordTypeWrap" style="margin-bottom:12px"><label for="fRecordType">Tipo de llamada</label><select id="fRecordType"><option value="aviso">Aviso técnico</option><option value="reclamacion">Reclamación</option><option value="anulacion">Anulación</option></select></div><div class="form-grid" id="noticeFieldsGrid"><div class="field" data-field-code="name"><label for="fName">Nombre y apellidos</label><input id="fName" required placeholder="Nombre del cliente"/></div><div class="field" data-field-code="phone"><label for="fPhone">Teléfono</label><input id="fPhone" required placeholder="600 000 000"/><small id="relatedNoticeHint" class="notice-match" hidden></small></div><div class="field" data-field-code="locality"><label for="fLocality">Localidad</label><input id="fLocality" placeholder="Localidad"/></div><div class="field" data-field-code="postal"><label for="fPostal">Código postal</label><input id="fPostal" placeholder="Código postal"/></div><div class="field" data-field-code="address" hidden><label for="fAddress">Dirección</label><input id="fAddress" placeholder="Dirección"/></div><div class="field" data-field-code="device"><label for="fDevice">Aparato</label><select id="fDevice"><option>Aire acondicionado</option><option>Lavadora</option><option>Lavavajillas</option><option>Secadora</option><option>Termo eléctrico</option><option>Caldera</option><option>Otro</option></select></div><div class="field" data-field-code="brand"><label for="fBrand">Marca del aparato</label><input id="fBrand" placeholder="Marca (opcional)"/></div><div class="field full" data-field-code="issue"><label id="fIssueLabel" for="fIssue">Avería o comentario</label><textarea id="fIssue" rows="3" placeholder="Describe brevemente el problema"></textarea></div></div><div class="field" id="statusFieldWrap" style="margin-top:12px"><label id="fStatusLabel" for="fStatus">Resultado del aviso</label><select id="fStatus"><option value="Nuevo">Pendiente</option><option value="Sale">Aviso Sacado</option><option value="No sale">Aviso Nulo</option></select></div><div id="extraNoticeFields" hidden></div><div class="modal-actions"><button type="button" class="outline-btn" id="cancelModal">Cancelar</button><button class="primary-btn" id="saveNotice" type="submit">Guardar aviso</button><button class="outline-btn" id="saveAndSchedule" type="submit" hidden>Guardar y agendar</button></div></form></div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
 <script src="supabase-config.js"></script>
-<script src="app.js?v=20261105-59"></script>
+<script src="app.js?v=20261105-60"></script>
 </body>
 </html>
