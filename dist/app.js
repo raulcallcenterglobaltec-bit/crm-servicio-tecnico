@@ -58,7 +58,7 @@ function formDialog({title,description='',fields=[],confirmText='Guardar',classN
     backdrop.addEventListener('click',e=>{const target=e.target;if(target===backdrop||(target instanceof Element&&target.closest('[data-dialog-cancel]'))){e.preventDefault();e.stopPropagation();finish(null);}});
     $('form',backdrop).addEventListener('submit',e=>{e.preventDefault();const result={};for(const f of fields){if(f.type==='action')continue;const el=$('[name="'+CSS.escape(f.key)+'"]',backdrop);if(f.type==='search-select'&&!el.value){const search=$('[data-search-select-input="'+CSS.escape(f.key)+'"]',backdrop);search.setCustomValidity('Selecciona un cliente de la lista.');search.reportValidity();search.focus();return;}result[f.key]=f.type==='checkbox'?el.checked:f.type==='number'?Number(el.value):f.type==='file'?(el.files?.[0]||null):el.value;}if(className==='agenda-form-dialog'){
         const clientEdits={};
-        $('[data-agenda-client-edit]',backdrop).forEach(input=>clientEdits[input.dataset.agendaClientEdit]=input.value.trim());
+        backdrop.querySelectorAll('[data-agenda-client-edit]').forEach(input=>clientEdits[input.dataset.agendaClientEdit]=input.value.trim());
         if(Object.keys(clientEdits).length)result.clientEdits=clientEdits;
       }
       finish(result);});
