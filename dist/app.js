@@ -49,12 +49,26 @@ function formDialog({title,description='',fields=[],confirmText='Guardar',classN
       return `<label class="field" data-dialog-field="${key}" style="margin:12px 0"><span>${label}</span>${control}</label>`;
     }).join('');
     backdrop.innerHTML=`<form class="modal ${esc(className)}" style="max-height:90vh;overflow:auto" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>${esc(title)}</h2><p>${esc(description)}</p></div><button class="close" type="button" data-dialog-cancel aria-label="Cerrar">×</button></div>${controls}<div class="modal-actions"><button class="outline-btn" type="button" data-dialog-cancel>Cancelar</button><button class="primary-btn" type="submit">${esc(confirmText)}</button></div></form>`;
+    if(className==='agenda-form-dialog'&&fields.some(field=>field.key==='notice_id')){
+      const preview=document.createElement('aside');preview.className='agenda-client-preview';preview.dataset.agendaClientPreview='true';
+      preview.innerHTML='<div class="agenda-client-preview-empty">Selecciona un aviso para ver los datos del cliente.</div>';
+      const searchField=$('[data-dialog-field="notice_id"]',backdrop);if(searchField)searchField.after(preview);
+    }
     const finish=value=>{backdrop.remove();resolve(value);};
     backdrop.addEventListener('click',e=>{const target=e.target;if(target===backdrop||(target instanceof Element&&target.closest('[data-dialog-cancel]'))){e.preventDefault();e.stopPropagation();finish(null);}});
     $('form',backdrop).addEventListener('submit',e=>{e.preventDefault();const result={};for(const f of fields){if(f.type==='action')continue;const el=$('[name="'+CSS.escape(f.key)+'"]',backdrop);if(f.type==='search-select'&&!el.value){const search=$('[data-search-select-input="'+CSS.escape(f.key)+'"]',backdrop);search.setCustomValidity('Selecciona un cliente de la lista.');search.reportValidity();search.focus();return;}result[f.key]=f.type==='checkbox'?el.checked:f.type==='number'?Number(el.value):f.type==='file'?(el.files?.[0]||null):el.value;}finish(result);});
     $$('[data-dialog-action]',backdrop).forEach(button=>{const field=fields.find(f=>f.type==='action'&&f.key===button.dataset.dialogAction);button.addEventListener('click',()=>field?.onAction?.({backdrop}));});
     $$('[data-search-select-input]',backdrop).forEach(input=>{
       const key=input.dataset.searchSelectInput,hidden=$('[name="'+CSS.escape(key)+'"]',backdrop),results=$('[data-search-select-results="'+CSS.escape(key)+'"]',backdrop),options=(fields.find(f=>f.key===key)?.options||[]).map(o=>typeof o==='string'?{value:o,label:o}:o);
+      const preview=$('[data-agenda-client-preview]',backdrop);
+      const renderPreview=option=>{
+        if(!preview)return;
+        const detail=option?.detail;
+        if(!detail){preview.innerHTML='<div class="agenda-client-preview-empty">Selecciona un aviso para ver los datos del cliente.</div>';return;}
+        const rows=[['Nombre',detail.name],['Teléfono',detail.phone],['Dirección',detail.address],['Localidad',detail.locality],['Aparato',detail.device],['Qué le pasa',detail.issue]].map(([label,value])=>'<div class="agenda-client-preview-item"><span>'+esc(label)+'</span><strong>'+esc(value||'—')+'</strong></div>').join('');
+        preview.innerHTML='<div class="agenda-client-preview-title">Datos del aviso</div><div class="agenda-client-preview-grid">'+rows+'</div>';
+      };
+      renderPreview(options.find(option=>String(option.value)===String(hidden?.value)));
       const render=()=>{
         const query=input.value.trim().toLocaleLowerCase();
         if(!query){results.innerHTML='<div style="padding:9px;color:#718097;font-size:12px">Escribe un nombre, teléfono o dirección para buscar.</div>';return;}
@@ -62,9 +76,9 @@ function formDialog({title,description='',fields=[],confirmText='Guardar',classN
         results.innerHTML=filtered.length?filtered.map(o=>'<button type="button" data-search-select-option="'+esc(o.value)+'" style="display:block;width:100%;padding:9px 10px;border:0;border-radius:6px;background:#fff;text-align:left;font:inherit;font-size:12px;color:#26354e;cursor:pointer">'+esc(o.label||o.value)+'</button>').join(''):'<div style="padding:9px;color:#718097;font-size:12px">No hay avisos sacados que coincidan.</div>';
       };
       input.addEventListener('focus',()=>{render();results.hidden=false;});
-      input.addEventListener('input',()=>{hidden.value='';input.setCustomValidity('');render();results.hidden=false;});
+      input.addEventListener('input',()=>{hidden.value='';renderPreview(null);input.setCustomValidity('');render();results.hidden=false;});
       results.addEventListener('mousedown',e=>e.preventDefault());
-      results.addEventListener('click',e=>{const option=e.target.closest('[data-search-select-option]');if(!option)return;hidden.value=option.dataset.searchSelectOption;input.value=option.textContent;input.setCustomValidity('');results.hidden=true;});
+      results.addEventListener('click',e=>{const option=e.target.closest('[data-search-select-option]');if(!option)return;hidden.value=option.dataset.searchSelectOption;input.value=option.textContent;renderPreview(options.find(item=>String(item.value)===String(hidden.value)));input.setCustomValidity('');results.hidden=true;});
       input.addEventListener('keydown',e=>{if(e.key==='Escape')results.hidden=true;});
       document.addEventListener('click',e=>{if(!e.target.closest('.search-select-wrap'))results.hidden=true;});
     });
@@ -1436,8 +1450,7 @@ function agendaEligibleNotices() {
     .sort((a,b)=>new Date(b.received_at)-new Date(a.received_at));
 }
 function agendaNoticeLabel(notice) {
-  const parts=[notice.customer_name||'Cliente sin nombre',notice.phone||'Sin teléfono',appointmentAddressFromNotice(notice)||'Dirección sin indicar',notice.device||notice.category||'Aviso técnico',notice.landing_id?landingName(notice.landing_id):'Teléfono',formatDate(notice.received_at)];
-  return parts.filter(Boolean).join(' · ');
+  return [notice.customer_name||'Cliente sin nombre',notice.phone||'Sin teléfono'].join(' · ');
 }
 function addressFieldForNotice(notice) {
   if(!notice)return null;
@@ -1546,7 +1559,7 @@ async function openAppointmentDialog(existing=null,overrides={}) {
       {key:'notes',label:'Notas adicionales',type:'textarea',value:source.notes||''},
       {key:'status',label:'Estado',type:'select',value:overrides.status||((source.status==='cancelled')?'scheduled':source.status||'scheduled'),options:[{value:'scheduled',label:'Programada'},{value:'completed',label:'Realizada'}]}
     ]:[
-      {key:'notice_id',label:'Buscar por nombre, teléfono o dirección',type:'search-select',value:requestedId,required:true,placeholder:'Escribe el nombre, teléfono o dirección',options:eligible.map(n=>({value:n.id,label:agendaNoticeLabel(n)}))},
+      {key:'notice_id',label:'Buscar por nombre, teléfono o dirección',type:'search-select',value:requestedId,required:true,placeholder:'Escribe el nombre, teléfono o dirección',options:eligible.map(n=>{const addressField=addressFieldForNotice(n);return {value:n.id,label:agendaNoticeLabel(n),detail:{name:n.customer_name||'Cliente sin nombre',phone:n.phone||'',address:String((n.custom_fields||{})[addressField?.field_key]||'').trim(),locality:n.locality||'',device:n.device||n.category||'',issue:n.issue||''}};})},
       {key:'duration_minutes',label:'Duración en minutos',type:'number',value:source.duration_minutes||60,required:true},
       {key:'available_slots',label:'Ver huecos libres',type:'action',onAction:({backdrop})=>openFreeSlotsDialog(backdrop,source.id)},
       {key:'start_at',label:'Fecha y hora (si ya tienes hora concreta)',type:'datetime-local',value:localDateTimeValue(startDefault),required:true},
