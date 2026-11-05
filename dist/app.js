@@ -548,8 +548,9 @@ function renderClientHistory() {
   const results=$('#historyResults');if(!results)return;
   const input=$('#historySearch'),query=(input?.value||'').trim(),needle=query.toLowerCase(),digits=normalizePhoneForMatch(query);
   const groups=clientHistoryGroups();
-  if(query.length<2){selectedHistoryKey=null;results.innerHTML='<div class="empty">Introduce un teléfono o nombre para buscar.</div>';renderClientHistoryDetail(groups);return;}
-  const matches=groups.filter(group=>group.searchText.includes(needle)||(digits.length>=2&&group.searchPhones.some(phone=>phone.includes(digits))));
+  const matches=query
+    ? groups.filter(group=>group.searchText.includes(needle)||(digits.length>=1&&group.searchPhones.some(phone=>phone.includes(digits))))
+    : groups;
   if(!matches.length){selectedHistoryKey=null;results.innerHTML='<div class="empty">No encontramos un cliente con esos datos.</div>';renderClientHistoryDetail(groups);return;}
   if(!matches.some(group=>group.key===selectedHistoryKey))selectedHistoryKey=matches.length===1?matches[0].key:null;
   results.innerHTML=matches.map(group=>{
