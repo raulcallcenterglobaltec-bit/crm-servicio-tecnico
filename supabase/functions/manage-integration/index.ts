@@ -87,9 +87,9 @@ Deno.serve(async (req) => {
             if ((routes[type] as string[]).includes(channel) && (!target.length || target.some((email: string) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))) return json({ error: `Indica un correo válido para ${type === 'form' ? 'avisos de formulario' : type === 'phone' ? 'avisos telefónicos' : type === 'complaint' ? 'reclamaciones' : 'anulaciones'}.` }, 400)
           } else if (channel === 'whatsapp') {
             target = String(target).replace(/\D/g, '')
-            if ((routes[type] as string[]).includes(channel) && !/^\d{8,15}$/.test(target as string)) return json({ error: `Indica el número de WhatsApp con prefijo internacional para ${type === 'form' ? 'avisos de formulario' : type === 'phone' ? 'avisos telefónicos' : 'reclamaciones o anulaciones'}.` }, 400)
+            if ((routes[type] as string[]).includes(channel) && !/^\d{8,15}$/.test(target as string)) return json({ error: `Indica el número de WhatsApp con prefijo internacional para ${type === 'form' ? 'avisos de formulario' : type === 'phone' ? 'avisos telefónicos' : type === 'complaint' ? 'reclamaciones' : 'anulaciones'}.` }, 400)
           } else if ((routes[type] as string[]).includes(channel) && !target) {
-            return json({ error: `Indica el grupo de Telegram para ${type === 'form' ? 'avisos de formulario' : type === 'phone' ? 'avisos telefónicos' : 'reclamaciones o anulaciones'}.` }, 400)
+            return json({ error: `Indica el grupo de Telegram para ${type === 'form' ? 'avisos de formulario' : type === 'phone' ? 'avisos telefónicos' : type === 'complaint' ? 'reclamaciones' : 'anulaciones'}.` }, 400)
           }
           normalized[type][channel] = target
           if ((routes[type] as string[]).includes(channel) && !updates.has(channel)) return json({ error: `Configura ${channel} antes de activarlo.` }, 400)
