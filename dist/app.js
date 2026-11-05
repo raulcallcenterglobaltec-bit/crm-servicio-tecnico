@@ -56,7 +56,12 @@ function formDialog({title,description='',fields=[],confirmText='Guardar',classN
     }
     const finish=value=>{backdrop.remove();resolve(value);};
     backdrop.addEventListener('click',e=>{const target=e.target;if(target===backdrop||(target instanceof Element&&target.closest('[data-dialog-cancel]'))){e.preventDefault();e.stopPropagation();finish(null);}});
-    $('form',backdrop).addEventListener('submit',e=>{e.preventDefault();const result={};for(const f of fields){if(f.type==='action')continue;const el=$('[name="'+CSS.escape(f.key)+'"]',backdrop);if(f.type==='search-select'&&!el.value){const search=$('[data-search-select-input="'+CSS.escape(f.key)+'"]',backdrop);search.setCustomValidity('Selecciona un cliente de la lista.');search.reportValidity();search.focus();return;}result[f.key]=f.type==='checkbox'?el.checked:f.type==='number'?Number(el.value):f.type==='file'?(el.files?.[0]||null):el.value;}finish(result);});
+    $('form',backdrop).addEventListener('submit',e=>{e.preventDefault();const result={};for(const f of fields){if(f.type==='action')continue;const el=$('[name="'+CSS.escape(f.key)+'"]',backdrop);if(f.type==='search-select'&&!el.value){const search=$('[data-search-select-input="'+CSS.escape(f.key)+'"]',backdrop);search.setCustomValidity('Selecciona un cliente de la lista.');search.reportValidity();search.focus();return;}result[f.key]=f.type==='checkbox'?el.checked:f.type==='number'?Number(el.value):f.type==='file'?(el.files?.[0]||null):el.value;}if(className==='agenda-form-dialog'){
+        const clientEdits={};
+        $('[data-agenda-client-edit]',backdrop).forEach(input=>clientEdits[input.dataset.agendaClientEdit]=input.value.trim());
+        if(Object.keys(clientEdits).length)result.clientEdits=clientEdits;
+      }
+      finish(result);});
     $$('[data-dialog-action]',backdrop).forEach(button=>{const field=fields.find(f=>f.type==='action'&&f.key===button.dataset.dialogAction);button.addEventListener('click',()=>field?.onAction?.({backdrop}));});
     $$('[data-search-select-input]',backdrop).forEach(input=>{
       const key=input.dataset.searchSelectInput,hidden=$('[name="'+CSS.escape(key)+'"]',backdrop),results=$('[data-search-select-results="'+CSS.escape(key)+'"]',backdrop),options=(fields.find(f=>f.key===key)?.options||[]).map(o=>typeof o==='string'?{value:o,label:o}:o);
@@ -64,9 +69,16 @@ function formDialog({title,description='',fields=[],confirmText='Guardar',classN
       const renderPreview=option=>{
         if(!preview)return;
         const detail=option?.detail;
-        if(!detail){preview.innerHTML='<div class="agenda-client-preview-empty">Selecciona un aviso para ver los datos del cliente.</div>';return;}
-        const rows=[['Nombre',detail.name],['Teléfono',detail.phone],['Dirección',detail.address],['Localidad',detail.locality],['Aparato',detail.device],['Qué le pasa',detail.issue]].map(([label,value])=>'<div class="agenda-client-preview-item"><span>'+esc(label)+'</span><strong>'+esc(value||'—')+'</strong></div>').join('');
-        preview.innerHTML='<div class="agenda-client-preview-title">Datos del aviso</div><div class="agenda-client-preview-grid">'+rows+'</div>';
+        if(!detail){preview.innerHTML='<div class="agenda-client-preview-empty">Selecciona un aviso para ver sus datos.</div>';return;}
+        const editable=canManageCurrentNotices();
+        const editFields=[['customer_name','Nombre',detail.name,'text'],['phone','Teléfono',detail.phone,'tel'],['address','Dirección',detail.address,'text'],['locality','Localidad',detail.locality,'text'],['device','Aparato',detail.device,'text'],['issue','Qué le pasa',detail.issue,'textarea']];
+        const rows=editFields.map(([key,label,value,type])=>{
+          const wide=key==='issue'?' wide':'';
+          if(!editable)return '<div class="agenda-client-preview-item'+wide+'"><span>'+esc(label)+'</span><strong>'+esc(value||'—')+'</strong></div>';
+          const control=type==='textarea'?'<textarea data-agenda-client-edit="'+key+'">'+esc(value||'')+'</textarea>':'<input data-agenda-client-edit="'+key+'" type="'+type+'" value="'+esc(value||'')+'" '+(['customer_name','phone'].includes(key)?'required':'')+'/>';
+          return '<label class="agenda-client-preview-item'+wide+'"><span>'+esc(label)+'</span>'+control+'</label>';
+        }).join('');
+        preview.innerHTML='<div class="agenda-client-preview-title">Datos del aviso'+(editable?'<small>Puedes editar y guardar estos datos junto con la cita.</small>':'')+'</div><div class="agenda-client-preview-grid">'+rows+'</div>';
       };
       renderPreview(options.find(option=>String(option.value)===String(hidden?.value)));
       const render=()=>{
@@ -1455,7 +1467,10 @@ function agendaNoticeLabel(notice) {
 function addressFieldForNotice(notice) {
   if(!notice)return null;
   const source=notice.landing_id?fieldsForLanding(notice.landing_id):fieldsForPhone();
-  return source.find(field=>/direcci[oó]n/i.test(String(field.label||''))||/address|direccion/i.test(String(field.field_key||'')))||null;
+  const configured=source.find(field=>/direcci[oó]n/i.test(String(field.label||''))||/address|direccion/i.test(String(field.field_key||'')));
+  if(configured)return configured;
+  const customKey=Object.keys(notice.custom_fields||{}).find(key=>/address|direccion/i.test(String(key||'')));
+  return customKey?{field_key:customKey}:null;
 }
 function appointmentAddressFromNotice(notice) {
   if(!notice)return '';
@@ -1579,6 +1594,18 @@ async function openAppointmentDialog(existing=null,overrides={}) {
   if(!isFree&&!selectedNotice){toast('Selecciona un aviso marcado como sacado.','Aviso no disponible');return;}
   const start=new Date(answer.start_at);
   if(!Number.isFinite(start.getTime())){toast('Indica una fecha y hora válidas.','Fecha no válida');return;}
+  if(!isFree&&selectedNotice&&answer.clientEdits){
+    const edits=answer.clientEdits,addressField=addressFieldForNotice(selectedNotice),custom={...(selectedNotice.custom_fields||{})};
+    const addressKey=addressField?.field_key||'address';
+    custom[addressKey]=edits.address||null;
+    const noticePatch={customer_name:edits.customer_name||null,phone:edits.phone||null,locality:edits.locality||null,device:edits.device||null,issue:edits.issue||null,custom_fields:custom};
+    const changed=noticePatch.customer_name!==(selectedNotice.customer_name||null)||noticePatch.phone!==(selectedNotice.phone||null)||noticePatch.locality!==(selectedNotice.locality||null)||noticePatch.device!==(selectedNotice.device||null)||noticePatch.issue!==(selectedNotice.issue||null)||String(custom[addressKey]||'')!==String((selectedNotice.custom_fields||{})[addressKey]||'');
+    if(changed){
+      const {data,error}=await db.from('notices').update(noticePatch).eq('id',selectedNotice.id).select().single();
+      if(error){toast(errorText(error),'No se pudieron guardar los datos del cliente');return;}
+      Object.assign(selectedNotice,data);
+    }
+  }
   const payload={
     company_id:currentCompany.id,
     notice_id:selectedNotice?.id||null,
