@@ -1154,7 +1154,9 @@ async function createNotice(event) {
   if(saveAndSchedule){showPage('agenda');await openAppointmentDialog(null,{notice_id:data.id});}
 }
 function showSettingsTab(name) {
-  $$('[data-settings-tab]').forEach(button=>button.classList.toggle('active',button.dataset.settingsTab===name));
+  const currentTab=$('#page-configuracion [data-settings-tab].active')?.dataset.settingsTab;
+  if(currentTab&&currentTab!==name)collapseSettingsPanels();
+  $('[data-settings-tab]').forEach(button=>button.classList.toggle('active',button.dataset.settingsTab===name));
   const panelName=(name==='phone-fields'||name==='landing-fields')?'fields':name;
   $$('#page-configuracion [data-settings-panel]').forEach(panel=>panel.classList.toggle('active',panel.dataset.settingsPanel===panelName));
   if(name==='phone-fields'){fieldScope='phone';renderFields();}
@@ -1802,7 +1804,17 @@ async function syncPendingCalendarAppointments() {
   else toast('Agenda sincronizada con Google Calendar.','Sincronización lista');
 }
 
+function collapseSettingsPanels() {
+  document.querySelectorAll('#page-configuracion [data-settings-collapse]').forEach(button=>{
+    const body=document.getElementById(button.getAttribute('aria-controls'));
+    if(!body)return;
+    body.hidden=true;
+    button.textContent='Mostrar';
+    button.setAttribute('aria-expanded','false');
+  });
+}
 function showPage(name) {
+  if(name!=='configuracion')collapseSettingsPanels();
   if(!isSuperAdmin&&!['avisos-landing','avisos-phone','informes','reclamaciones','anulaciones','historial','agenda'].includes(name))return;
   const pageName=(name==='avisos-landing'||name==='avisos-phone')?'avisos':name;
   $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+pageName));
