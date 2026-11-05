@@ -1826,7 +1826,7 @@ function showPage(name) {
 }
 function wireUI() {
   installPendingUi();
-  document.querySelectorAll('#page-configuracion [data-settings-menu-toggle]').forEach(button=>button.addEventListener('click',()=>{const items=button.closest('.settings-menu-group')?.querySelector('.settings-menu-items');if(!items)return;items.hidden=!items.hidden;button.textContent=items.hidden?'Mostrar':'Ocultar';button.setAttribute('aria-expanded',String(!items.hidden));}));
+  document.querySelectorAll('#page-configuracion [data-settings-collapse]').forEach(button=>button.addEventListener('click',()=>{const body=document.getElementById(button.getAttribute('aria-controls'));if(!body)return;body.hidden=!body.hidden;button.textContent=body.hidden?'Mostrar':'Ocultar';button.setAttribute('aria-expanded',String(!body.hidden));}));
   $('#sidebar').addEventListener('click',event=>{const button=event.target.closest('button[data-page]');if(button){event.preventDefault();showPage(button.dataset.page);}});
   setupDate('main');setupDate('report');
   ['tableSearch','globalSearch'].forEach(id=>$('#'+id).addEventListener('input',renderRows));
