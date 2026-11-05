@@ -953,7 +953,8 @@ function renderExtraFields() {
   syncDefaultFields();
   const host=$('#extraNoticeFields');if(!host)return;
   $$('[data-custom-key]').forEach(node=>node.remove());
-  host.innerHTML=fieldsForPhone().filter(f=>f.visible_in_form&&!['customer_name','phone','locality','postal_code','device','brand','issue'].includes(f.field_key)).map(f=>{
+  const isNonNotice=$('#fRecordType')?.value!=='aviso';
+  host.innerHTML=fieldsForPhone().filter(f=>f.visible_in_form&&!['customer_name','phone','locality','postal_code','device','brand','issue'].includes(f.field_key)&&!(isNonNotice&&(/direcci[oó]n/i.test(String(f.label||''))||/address|direccion/i.test(String(f.field_key||''))))).map(f=>{
     const inputType={text:'text',phone:'tel',email:'email',number:'number',date:'date',select:'select',textarea:'textarea',checkbox:'checkbox'}[f.field_type]||'text';
     let field=inputType==='select'?'<select '+(f.required?'required':'')+'>'+['',...(f.options||[])].map(v=>`<option>${esc(v)}</option>`).join('')+'</select>':inputType==='textarea'?'<textarea '+(f.required?'required':'')+'></textarea>':`<input type="${inputType}" ${f.required?'required':''} ${inputType==='checkbox'?'value="true"':''}/>`;
     return `<label class="field custom-field-value" data-custom-key="${esc(f.field_key)}"><span>${esc(f.label)}</span>${field}</label>`;
@@ -977,7 +978,8 @@ function syncDefaultFields() {
 }
 function updateRecordFormMode() {
   const type=$('#fRecordType')?.value||'aviso',nonNotice=type!=='aviso';
-  $('#recordTypeWrap').hidden=noticeSource!=='phone'||!nonNotice;
+  $('#recordTypeWrap').hidden=true;
+  const addressField=$('[data-field-code="address"]');if(addressField)addressField.hidden=!nonNotice;
   $('#statusFieldWrap').hidden=noticeSource!=='phone';
   const status=$('#fStatus'),statusLabel=$('#fStatusLabel');
   if(status&&statusLabel&&nonNotice){
@@ -1044,6 +1046,8 @@ async function openPhoneNotice(type='aviso', preselectedId=null) {
     $('#fName').value=prior.customer_name||'';
     $('#fLocality').value=prior.locality||'';
     $('#fPostal').value=prior.postal_code||'';
+    const addressConfig=addressFieldForNotice(prior);
+    $('#fAddress').value=addressConfig?String((prior.custom_fields||{})[addressConfig.field_key]||''):'';
     const hint=$('#relatedNoticeHint');
     if(hint){hint.hidden=false;hint.className=matched?'notice-match found':'notice-match missing';hint.textContent=matched?`Aviso encontrado: ${matched.device||matched.category||'Aviso técnico'} · ${matched.locality||'Localidad sin indicar'} · ${formatDate(matched.received_at)} · ${matched.landing_id?landingName(matched.landing_id):'Teléfono'}. Datos del cliente completados.`:'No hay un aviso sacado asociado. Comprueba el número y completa los datos manualmente.';}
   } else {const hint=$('#relatedNoticeHint');if(hint)hint.hidden=true;}
@@ -1090,6 +1094,8 @@ async function createNotice(event) {
   const v=id=>$('#'+id).value.trim();
   const isPhoneNotice=type==='aviso',device=isPhoneNotice?v('fDevice'):'';const custom_fields={};
   $$('[data-custom-key]', $('#noticeForm')).forEach(el=>{const c=$('input,select,textarea',el);custom_fields[el.dataset.customKey]=c.type==='checkbox'?c.checked:c.value;});
+  const addressConfig=addressFieldForNotice(relatedNoticeMatch);
+  if(type!=='aviso')custom_fields[addressConfig?.field_key||'address']=v('fAddress')||null;
   const category=categoryFor(device);
   const row={company_id:currentCompany.id,landing_id:null,notice_type:type,status:v('fStatus')||'Nuevo',customer_name:v('fName'),phone:v('fPhone'),email:$('#fEmail')?.value?.trim()||null,locality:v('fLocality')||null,postal_code:v('fPostal')||null,device:device||null,category:isPhoneNotice?category:null,brand:isPhoneNotice?(v('fBrand')||null):null,issue:v('fIssue')||null,custom_fields,unit_price:0,management_reason:managementReason,created_by:user.id};
   if(!isPhoneNotice&&relatedNoticeMatch)row.related_notice_id=relatedNoticeMatch.id;
@@ -1409,10 +1415,14 @@ function agendaNoticeLabel(notice) {
   const parts=[notice.customer_name||'Cliente sin nombre',notice.phone||'Sin teléfono',appointmentAddressFromNotice(notice)||'Dirección sin indicar',notice.device||notice.category||'Aviso técnico',notice.landing_id?landingName(notice.landing_id):'Teléfono',formatDate(notice.received_at)];
   return parts.filter(Boolean).join(' · ');
 }
+function addressFieldForNotice(notice) {
+  if(!notice)return null;
+  const source=notice.landing_id?fieldsForLanding(notice.landing_id):fieldsForPhone();
+  return source.find(field=>/direcci[oó]n/i.test(String(field.label||''))||/address|direccion/i.test(String(field.field_key||'')))||null;
+}
 function appointmentAddressFromNotice(notice) {
   if(!notice)return '';
-  const source=notice.landing_id?fieldsForLanding(notice.landing_id):fieldsForPhone();
-  const addressField=source.find(field=>/direcci[oó]n/i.test(String(field.label||''))||/address|direccion/i.test(String(field.field_key||'')));
+  const addressField=addressFieldForNotice(notice);
   const custom=notice.custom_fields||{};
   const value=addressField?custom[addressField.field_key]:null;
   return String(value||'').trim()||[notice.locality,notice.postal_code].filter(Boolean).join(', ');
