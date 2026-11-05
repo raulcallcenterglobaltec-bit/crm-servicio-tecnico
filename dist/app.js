@@ -1816,6 +1816,7 @@ function collapseSettingsPanels() {
 function showPage(name) {
   if(name!=='configuracion')collapseSettingsPanels();
   if(!isSuperAdmin&&!['avisos-landing','avisos-phone','informes','reclamaciones','anulaciones','historial','agenda'].includes(name))return;
+  closeMobileMenu(false);
   const pageName=(name==='avisos-landing'||name==='avisos-phone')?'avisos':name;
   $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+pageName));
   $$('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
@@ -1835,6 +1836,32 @@ function showPage(name) {
   if(pageName==='historial')renderClientHistory();
   if(pageName==='agenda')renderAgenda();
   $('#sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'});
+}
+let mobileMenuScrollY=0;
+function openMobileMenu() {
+  if(!window.matchMedia('(max-width:760px)').matches)return;
+  const sidebar=$('#sidebar'),toggle=$('#menuToggle'),backdrop=$('#menuBackdrop');
+  if(!sidebar||sidebar.classList.contains('open'))return;
+  mobileMenuScrollY=window.scrollY;
+  document.body.style.position='fixed';
+  document.body.style.top=`-${mobileMenuScrollY}px`;
+  document.body.style.width='100%';
+  document.body.classList.add('mobile-menu-open');
+  sidebar.classList.add('open');
+  if(backdrop)backdrop.hidden=false;
+  if(toggle){toggle.textContent='×';toggle.setAttribute('aria-expanded','true');toggle.setAttribute('aria-label','Cerrar menú');}
+}
+function closeMobileMenu(restoreScroll=true) {
+  const sidebar=$('#sidebar'),toggle=$('#menuToggle'),backdrop=$('#menuBackdrop');
+  if(!sidebar?.classList.contains('open'))return;
+  sidebar.classList.remove('open');
+  if(backdrop)backdrop.hidden=true;
+  document.body.classList.remove('mobile-menu-open');
+  document.body.style.position='';
+  document.body.style.top='';
+  document.body.style.width='';
+  if(toggle){toggle.textContent='☰';toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-label','Abrir menú');}
+  if(restoreScroll)window.scrollTo(0,mobileMenuScrollY);
 }
 function wireUI() {
   installPendingUi();
@@ -1864,7 +1891,10 @@ function wireUI() {
   $('#modal').addEventListener('click',e=>{if(e.target.id==='modal')e.currentTarget.classList.remove('open');});
   $('#fPhone').addEventListener('input',()=>{duplicatePhoneBypass=null;});
   $('#noticeForm').addEventListener('submit',createNotice);
-  $('#menuToggle').addEventListener('click',()=>$('#sidebar').classList.toggle('open'));
+  $('#menuToggle').addEventListener('click',()=>$('#sidebar').classList.contains('open')?closeMobileMenu(true):openMobileMenu());
+  $('#menuBackdrop').addEventListener('click',()=>closeMobileMenu(true));
+  document.addEventListener('keydown',event=>{if(event.key==='Escape')closeMobileMenu(true);});
+  window.addEventListener('resize',()=>{if(!window.matchMedia('(max-width:760px)').matches)closeMobileMenu(false);});
   $('#pendingLandingButton').addEventListener('click',openPendingNotices);
   $$('[data-notice-list]').forEach(card=>{
     card.addEventListener('click',()=>openPendingNotices(card.dataset.noticeList));
