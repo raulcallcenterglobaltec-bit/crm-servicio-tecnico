@@ -1156,7 +1156,7 @@ async function createNotice(event) {
 function showSettingsTab(name) {
   const currentTab=$('#page-configuracion [data-settings-tab].active')?.dataset.settingsTab;
   if(currentTab&&currentTab!==name)collapseSettingsPanels();
-  $('[data-settings-tab]').forEach(button=>button.classList.toggle('active',button.dataset.settingsTab===name));
+  $$('[data-settings-tab]').forEach(button=>button.classList.toggle('active',button.dataset.settingsTab===name));
   const panelName=(name==='phone-fields'||name==='landing-fields')?'fields':name;
   $$('#page-configuracion [data-settings-panel]').forEach(panel=>panel.classList.toggle('active',panel.dataset.settingsPanel===panelName));
   if(name==='phone-fields'){fieldScope='phone';renderFields();}
@@ -1819,7 +1819,7 @@ function showPage(name) {
   closeMobileMore(false);
   const pageName=(name==='avisos-landing'||name==='avisos-phone')?'avisos':name;
   $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+pageName));
-  $('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
+  $$('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
   document.querySelectorAll('#mobileNav [data-page],#mobileMorePanel [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
   const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',reclamaciones:'Reclamaciones',anulaciones:'Anulaciones',historial:'Historial de clientes',agenda:'Agenda - Citas',empresas:'Empresas',usuarios:'Usuarios y permisos',personalizacion:'Personalización',configuracion:'Configuración',integraciones:'Integraciones'};
   $('#breadcrumb').textContent='Panel / '+labels[name];
