@@ -1,3 +1,4 @@
+const ADMIN_PORTAL=location.pathname.endsWith('/admin.html');
 const CFG = window.CRM_SUPABASE_CONFIG || {};
 const hasBackend = !!(CFG.url && CFG.publishableKey && window.supabase?.createClient);
 const projectRef = (()=>{try{return new URL(CFG.url).hostname.split('.')[0];}catch(_){return '';}})();
@@ -190,7 +191,10 @@ async function loadMembershipsOnce() {
   membershipLoadStage='comprobando el perfil';
   const {data:globalRole,error:globalRoleError}=await db.rpc('is_super_admin');
   if(globalRoleError)throw globalRoleError;
-  isSuperAdmin=globalRole===true;applyAccessPermissions();
+  isSuperAdmin=globalRole===true;
+  if(isSuperAdmin&&!ADMIN_PORTAL){location.replace('admin.html');return;}
+  if(!isSuperAdmin&&ADMIN_PORTAL){location.replace('index.html');return;}
+  applyAccessPermissions();
   membershipLoadStage='cargando permisos de usuario';
   const {data,error}=await db.from('company_members').select('company_id,user_id,email,role,avatar_data,avatar_icon').eq('user_id',user.id);
   if(error)throw error; members=Array.isArray(data)?data:[];
@@ -202,6 +206,7 @@ async function loadMembershipsOnce() {
   const {data:rows,error:companyError}=isSuperAdmin?await companyQuery:await companyQuery.in('id',ids);
   if(companyError)throw companyError;
   companies=Array.isArray(rows)?rows:[];
+  if(ADMIN_PORTAL&&isSuperAdmin){currentCompany=null;$('#authScreen')?.remove();mountSignOut();renderCompanyPicker();renderCompanyPage();showPage('empresas');return;}
   if(!companies.length){
     currentCompany=null;
     if(!isSuperAdmin){showOnboarding();return;}
