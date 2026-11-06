@@ -23,6 +23,8 @@ const originalShowPage=showPage;
 showPage=function(name){
  const operational=MODULE_CATALOG.some(m=>m[0]===name)||name==='cobros';
  if(ADMIN_PORTAL&&operational&&!adminOperatingCompany){originalShowPage('empresas');return;}
+ if(ADMIN_PORTAL&&adminOperatingCompany&&operational&&name!=='cobros'&&!tenantModuleEnabled(name)){toast('Este bloque no está habilitado para esta empresa.');return;}
+ if(ADMIN_PORTAL&&adminOperatingCompany&&name==='cobros'&&!companyHasWorkFinance()){toast('La facturación y los cobros por trabajo están desactivados para esta empresa.','Bloque desactivado');return;}
  if(!ADMIN_PORTAL&&operational&&!tenantModuleEnabled(name)){toast('Este bloque no está habilitado para tu empresa.');return;}
  originalShowPage(name);
  if(ADMIN_PORTAL){
