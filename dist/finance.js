@@ -39,6 +39,29 @@ function financeNoticeDate(n){return financeDateOnly(n.work_completed_at||n.mana
 function financePeriodRows(){const r=financeRange();return notices.filter(n=>n.notice_type==='aviso'&&n.status==='Sale'&&financeNoticeDate(n)>=r.from&&financeNoticeDate(n)<=r.to);}
 function financeMoneyValue(value){return value===null||value===undefined||value===''?null:Number(value);}
 function financeFmtDate(value){if(!value)return '—';const d=new Date(String(value).slice(0,10)+'T12:00:00');return Number.isNaN(d.valueOf())?String(value):d.toLocaleDateString('es-ES');}
+function financePeriodPayments(range){
+  const byNotice=new Map();
+  for(const payment of financePayments.filter(p=>p.paid_at>=range.from&&p.paid_at<=range.to))
+    byNotice.set(payment.notice_id,(byNotice.get(payment.notice_id)||0)+Number(payment.amount||0));
+  return byNotice;
+}
+function renderFinanceDrilldown(kind,rangeRows,range){
+  const panel=$('#financeDrilldown');if(!panel||!panel.dataset.kind)return;
+  const paidInPeriod=financePeriodPayments(range);
+  let title='',rows=[];
+  if(kind==='gross'){title='Detalle del importe de trabajos';rows=rangeRows;}
+  else if(kind==='collected'){title='Trabajos con pagos recibidos en el periodo';rows=notices.filter(n=>n.notice_type==='aviso'&&paidInPeriod.has(n.id));}
+  else if(kind==='outstanding'){title='Trabajos pendientes de cobro';rows=rangeRows.filter(n=>n.work_amount!=null&&Number(n.work_amount)-financePaidTotal(n.id)>.005);}
+  else if(kind==='profit'){title='Detalle del beneficio estimado';rows=rangeRows.filter(n=>n.work_amount!=null);}
+  panel.hidden=false;
+  $('#financeDrilldownTitle').textContent=title;
+  $('#financeDrilldownRows').innerHTML=rows.length?rows.map(n=>{
+    const amount=n.work_amount==null?null:Number(n.work_amount),paid=financePaidTotal(n.id),balance=amount===null?null:Math.max(amount-paid,0),paidPeriod=paidInPeriod.get(n.id)||0;
+    const expenses=Number(n.material_cost||0)+Number(n.other_cost||0),profit=amount===null?null:amount-expenses,state=financeState(n),stateClass=state==='Cobrado'?'paid':state==='Parcial'?'partial':state==='Sin importe'?'unset':'';
+    const details=[n.device,n.locality,financeFmtDate(financeNoticeDate(n))].filter(Boolean).map(esc).join(' · ');
+    return '<article class="finance-drill-row"><div class="finance-drill-client"><div><strong>'+esc(n.customer_name||'Cliente sin nombre')+'</strong><small>'+esc(n.phone||'Sin teléfono')+(details?' · '+details:'')+'</small></div><span class="finance-state '+stateClass+'">'+esc(state)+'</span></div><div class="finance-drill-values"><span>Trabajo <b>'+(amount===null?'Sin importe':money(amount))+'</b></span><span>Cobrado total <b>'+money(paid)+'</b></span><span>En este periodo <b>'+money(paidPeriod)+'</b></span><span>Pendiente <b>'+(balance===null?'—':money(balance))+'</b></span><span>Gastos <b>'+money(expenses)+'</b></span><span>Beneficio <b>'+(profit===null?'—':money(profit))+'</b></span></div></article>';
+  }).join(''):'<div class="finance-empty">No hay trabajos en este desglose para el periodo y los filtros seleccionados.</div>';
+}
 function renderFinance(){
   const root=$('#page-cobros');if(!root)return;
   if(financeLoadError){$('#financeJobs').innerHTML='<div class="finance-empty">No se pudieron cargar los pagos: '+esc(financeLoadError)+'</div>';return;}
@@ -50,6 +73,7 @@ function renderFinance(){
   const outstandingCount=rangeRows.filter(n=>n.work_amount!=null&&financePaidTotal(n.id)<Number(n.work_amount||0)-.005).length;
   $('#financeGross').textContent=money(gross);$('#financeCollected').textContent=money(collectedInRange);$('#financeOutstanding').textContent=money(outstanding);
   $('#financeOutstandingCount').textContent=outstandingCount+' '+(outstandingCount===1?'trabajo':'trabajos');$('#financeProfit').textContent=money(gross-materials-other);
+  renderFinanceDrilldown($('#financeDrilldown')?.dataset.kind,rangeRows,range);
   const matches=rangeRows.filter(n=>{const hay=[n.customer_name,n.phone,n.locality,n.issue,landingName(n.landing_id)].join(' ').toLocaleLowerCase();return (!search||hay.includes(search))&&(status==='all'||financeState(n)===status);});
   $('#financeResultCount').textContent=matches.length+' '+(matches.length===1?'trabajo':'trabajos')+' · '+rangeRows.length+' en el periodo';
   $('#financeJobs').innerHTML=matches.length?matches.map(n=>{
@@ -66,6 +90,10 @@ function renderFinance(){
   root.querySelectorAll('[data-finance-payment]').forEach(b=>b.onclick=()=>openFinancePayment(b.dataset.financePayment));
   root.querySelectorAll('[data-finance-delete-payment]').forEach(b=>b.onclick=()=>deleteFinancePayment(b.dataset.financeDeletePayment));
   root.querySelectorAll('[data-finance-detail]').forEach(b=>b.onclick=()=>showDetails(b.dataset.financeDetail));
+  root.querySelectorAll('[data-finance-drill]').forEach(card=>{
+    const activate=()=>{const panel=$('#financeDrilldown');panel.dataset.kind=card.dataset.financeDrill;renderFinanceDrilldown(panel.dataset.kind,rangeRows,range);};
+    card.onclick=activate;card.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();activate();}};
+  });
 }
 async function openFinanceDetails(noticeId){
   if(!canManageCurrentNotices())return;const n=notices.find(item=>item.id===noticeId);if(!n)return;
@@ -116,6 +144,7 @@ function exportFinanceReport(){
 }
 function wireFinance(){
   if(!$('#page-cobros'))return;
+  $('#financeDrilldownClose').addEventListener('click',()=>{const panel=$('#financeDrilldown');panel.hidden=true;delete panel.dataset.kind;});
   $('#financePeriod').addEventListener('change',()=>{$('#financeRangeControls').hidden=$('#financePeriod').value!=='range';renderFinance();});
   ['financeDateFrom','financeDateTo','financeStatus'].forEach(id=>$('#'+id).addEventListener('change',renderFinance));
   $('#financeSearch').addEventListener('input',renderFinance);$('#financeExport').addEventListener('click',exportFinanceReport);
