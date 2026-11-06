@@ -81,7 +81,7 @@ function renderFinance(){
     const css=state==='Cobrado'?'paid':state==='Parcial'?'partial':state==='Sin importe'?'unset':'';
     const detail=[n.device,n.locality,n.issue].filter(Boolean).join(' · ');
     const paymentHtml=payments.length?'<div class="finance-payment-list">'+payments.map(p=>'<div>Pago '+financeFmtDate(p.paid_at)+' · '+money(p.amount)+(p.note?' · '+esc(p.note):'')+(canManageCurrentNotices()?' <button type="button" class="mini-delete" data-finance-delete-payment="'+esc(p.id)+'" aria-label="Eliminar pago" title="Eliminar pago">×</button>':'')+'</div>').join('')+'</div>':'';
-    const actions=(canManageCurrentNotices()?'<button type="button" class="outline-btn" data-finance-edit="'+esc(n.id)+'">'+(amount===null?'Completar datos':'Editar datos')+'</button>'+(amount!==null&&balance>0?'<button type="button" class="primary-btn" data-finance-payment="'+esc(n.id)+'">Registrar pago</button>':''):'')+'<button type="button" class="outline-btn" data-finance-detail="'+esc(n.id)+'">Ver aviso</button>';
+    const actions=(canManageCurrentNotices()?'<button type="button" class="primary-btn" data-finance-edit="'+esc(n.id)+'">'+(amount===null?'Añadir importe y gastos':'Editar facturación y gastos')+'</button>'+(amount!==null&&balance>0?'<button type="button" class="outline-btn" data-finance-payment="'+esc(n.id)+'">Registrar pago</button>':''):'')+'<button type="button" class="outline-btn" data-finance-detail="'+esc(n.id)+'">Ver aviso</button>';
     return '<article class="finance-job"><div class="finance-job-head"><div><strong>'+esc(n.customer_name||'Cliente sin nombre')+'</strong><div class="finance-job-sub">'+esc(n.phone||'Sin teléfono')+' · '+esc(n.landing_id?landingName(n.landing_id):'Llamada telefónica')+' · '+financeFmtDate(financeNoticeDate(n))+'</div></div><span class="finance-state '+css+'">'+esc(state)+'</span></div>'+(detail?'<div class="finance-job-sub" style="margin-top:8px">'+esc(detail)+'</div>':'')+'<div class="finance-job-meta"><div><span>Importe trabajo</span><strong>'+(amount===null?'Sin completar':money(amount))+'</strong></div><div><span>Recibido / pendiente</span><strong>'+money(paid)+(balance===null?'':' / '+money(balance))+'</strong></div><div><span>Gasto materiales</span><strong>'+money(n.material_cost||0)+'</strong></div><div><span>Otros gastos</span><strong>'+money(n.other_cost||0)+'</strong></div><div><span>Factura</span><strong>'+(n.invoice_issued?'Sí · '+financeFmtDate(n.invoice_date)+(n.invoice_number?' · Nº '+esc(n.invoice_number):''):'No')+'</strong></div><div><span>Gastos anotados</span><strong>'+money(Number(n.material_cost||0)+Number(n.other_cost||0))+'</strong></div></div>'+paymentHtml+'<div class="finance-job-actions">'+actions+'</div></article>';
   }).join(''):'<div class="finance-empty">No hay trabajos que coincidan con los filtros.</div>';
   const cards=[['Importe de trabajos',money(gross)],['Gastos de materiales',money(materials)],['Otros gastos',money(other)],['Beneficio estimado',money(gross-materials-other)],['Cobrado dentro del periodo',money(collectedInRange)],['Pendiente de cobro',money(outstanding)],['Trabajos sin importe',String(rangeRows.filter(n=>n.work_amount==null).length)],['Pagos registrados',String(financePayments.filter(p=>p.paid_at>=range.from&&p.paid_at<=range.to).length)]];
@@ -97,24 +97,33 @@ function renderFinance(){
 }
 async function openFinanceDetails(noticeId){
   if(!canManageCurrentNotices())return;const n=notices.find(item=>item.id===noticeId);if(!n)return;
-  const ans=await formDialog({title:'Datos del trabajo',description:'Anota lo facturado o cobrado, los gastos del trabajo y los datos de factura.',fields:[
-    {key:'work_amount',label:'Importe del trabajo (€)',type:'number',value:n.work_amount??''},
+  const ans=await formDialog({title:'Facturación y gastos del trabajo',description:'Indica el importe total a cobrar, si lleva factura y los gastos. Si el cliente ya ha pagado algo, anótalo también; los siguientes pagos se añaden con «Registrar pago».',fields:[
+    {key:'work_amount',label:'Importe total a cobrar al cliente (€)',type:'number',value:n.work_amount??''},
     {key:'work_completed_at',label:'Fecha del trabajo',type:'date',value:financeNoticeDate(n)},
-    {key:'invoice_issued',label:'Se ha emitido factura',type:'checkbox',value:n.invoice_issued===true},
+    {key:'invoice_issued',label:'Con factura (déjalo desmarcado si va sin factura)',type:'checkbox',value:n.invoice_issued===true},
     {key:'invoice_date',label:'Fecha de factura',type:'date',value:n.invoice_date||''},
     {key:'invoice_number',label:'Número de factura (opcional)',value:n.invoice_number||''},
     {key:'material_cost',label:'Gasto de materiales (€)',type:'number',value:n.material_cost??0},
     {key:'other_cost',label:'Otros gastos (€)',type:'number',value:n.other_cost??0},
-    {key:'other_cost_note',label:'Detalle de otros gastos (gasolina, comida, etc.)',type:'textarea',value:n.other_cost_note||''}
-  ],confirmText:'Guardar datos'});
+    {key:'other_cost_note',label:'Detalle de otros gastos (gasolina, comida, etc.)',type:'textarea',value:n.other_cost_note||''},
+    {key:'amount_received_now',label:'Importe cobrado ahora (€), si ya ha pagado',type:'number',value:''},
+    {key:'payment_date_now',label:'Fecha de ese cobro',type:'date',value:financeToday()}
+  ],confirmText:'Guardar facturación'});
   if(!ans)return;
-  const amount=financeMoneyValue(ans.work_amount),materials=Number(ans.material_cost||0),other=Number(ans.other_cost||0);
-  if((amount!==null&&amount<0)||materials<0||other<0){toast('Los importes no pueden ser negativos.','Revisa los datos');return;}
+  const amount=financeMoneyValue(ans.work_amount),materials=Number(ans.material_cost||0),other=Number(ans.other_cost||0),received=Number(ans.amount_received_now||0);
+  if((amount!==null&&amount<0)||materials<0||other<0||received<0){toast('Los importes no pueden ser negativos.','Revisa los datos');return;}
   if(amount!==null&&amount+.005<financePaidTotal(n.id)){toast('El importe del trabajo no puede ser menor que lo que ya se ha cobrado.','Revisa los datos');return;}
+  if(received>0&&(amount===null||received>amount-financePaidTotal(n.id)+.005)){toast('El cobro de ahora no puede superar lo que queda pendiente.','Revisa los datos');return;}
   const payload={work_amount:amount,work_completed_at:ans.work_completed_at||financeNoticeDate(n),invoice_issued:!!ans.invoice_issued,invoice_date:ans.invoice_issued?(ans.invoice_date||null):null,invoice_number:ans.invoice_issued?(ans.invoice_number.trim()||null):null,material_cost:materials,other_cost:other,other_cost_note:other?(ans.other_cost_note.trim()||null):null};
   const result=await db.from('notices').update(payload).eq('id',n.id).eq('company_id',currentCompany.id).select().single();
   if(result.error){toast(errorText(result.error),'No se pudieron guardar los datos');return;}
-  Object.assign(n,result.data);renderFinance();renderReport();toast('Datos del trabajo guardados.');
+  Object.assign(n,result.data);
+  if(received>0){
+    const paymentResult=await db.from('notice_payments').insert({company_id:currentCompany.id,notice_id:n.id,amount:received,paid_at:ans.payment_date_now||financeToday(),note:null}).select().single();
+    if(paymentResult.error){renderFinance();toast('La facturación y los gastos se guardaron, pero el cobro no: '+errorText(paymentResult.error),'Cobro pendiente de guardar');return;}
+    financePayments.unshift(paymentResult.data);
+  }
+  renderFinance();renderReport();toast(received>0?'Facturación, gastos y cobro guardados.':'Facturación y gastos guardados.');
 }
 async function openFinancePayment(noticeId){
   if(!canManageCurrentNotices())return;const n=notices.find(item=>item.id===noticeId);if(!n||n.work_amount==null)return;
