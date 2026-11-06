@@ -19,7 +19,7 @@ function financePaidTotal(noticeId){return financePaymentsFor(noticeId).reduce((
 function financeState(notice){
   if(notice.work_amount===null||notice.work_amount===undefined||notice.work_amount==='')return 'Sin importe';
   const amount=Number(notice.work_amount),paid=financePaidTotal(notice.id);
-  if(amount<=0)return paid>0?'Cobrado':'Pendiente';
+  if(amount<=0)return 'Cobrado';
   if(paid>=amount-.005)return 'Cobrado';
   if(paid>0)return 'Parcial';
   return 'Pendiente';
