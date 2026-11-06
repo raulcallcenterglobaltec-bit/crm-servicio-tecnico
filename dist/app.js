@@ -528,8 +528,8 @@ function renderRows() {
   $$('.bar-group').forEach((g,i)=>$$('.bar',g).forEach((b,j)=>b.style.height=`${days[i]?.[j]/max*100||0}%`));
   updateLandingBadge();
   $$('[data-status-id]',body).forEach(sel=>sel.addEventListener('change',e=>handleNoticeStatusChange(e.target.dataset.statusId,e.target.value,e.target)));
-  $('[data-open-id]',body).forEach(b=>b.addEventListener('click',()=>showDetails(b.dataset.openId)));
-  $('[data-finance-notice]',body).forEach(b=>b.addEventListener('click',()=>openFinanceDetails(b.dataset.financeNotice)));
+  $$('[data-open-id]',body).forEach(b=>b.addEventListener('click',()=>showDetails(b.dataset.openId)));
+  $$('[data-finance-notice]',body).forEach(b=>b.addEventListener('click',()=>openFinanceDetails(b.dataset.financeNotice)));
   $$('[data-edit-id]',body).forEach(b=>b.addEventListener('click',()=>editNotice(b.dataset.editId)));
   $$('[data-delete-id]',body).forEach(b=>b.addEventListener('click',()=>deleteNotice(b.dataset.deleteId)));
   renderReport();
