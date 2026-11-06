@@ -152,7 +152,6 @@ function exportFinanceReport(){
 }
 function wireFinance(){
   if(!$('#page-cobros'))return;
-  $('#financeDrilldownClose').addEventListener('click',()=>{const panel=$('#financeDrilldown');panel.hidden=true;delete panel.dataset.kind;});
   $('#financePeriod').addEventListener('change',()=>{$('#financeRangeControls').hidden=$('#financePeriod').value!=='range';renderFinance();});
   ['financeDateFrom','financeDateTo','financeStatus'].forEach(id=>$('#'+id).addEventListener('change',renderFinance));
   $('#financeSearch').addEventListener('input',renderFinance);$('#financeExport').addEventListener('click',exportFinanceReport);
