@@ -1170,9 +1170,13 @@ async function createNotice(event) {
   if(row.status==='Sale'&&currentCompany?.show_work_finance)row.work_completed_at=financeToday();
   if(!isPhoneNotice&&relatedNoticeMatch)row.related_notice_id=relatedNoticeMatch.id;
   if(row.status==='Sale'&&isPhoneNotice)row.unit_price=Number(tariffForNotice(row)?.price||0);
-  const {data,error}=await db.from('notices').insert(row).select().single();
-  if(error){submitButtons.forEach(button=>button.disabled=false);toast(errorText(error),'No se pudo guardar el aviso');return;}
-  submitButtons.forEach(button=>button.disabled=false);
+  submitButtons.forEach(button=>button.disabled=true);$('#saveNotice').textContent='Guardando…';
+  let saved;
+  try{saved=await db.from('notices').insert(row).select().single();}
+  catch(error){submitButtons.forEach(button=>button.disabled=false);updateRecordSubmitLabel();toast(errorText(error),'Error al guardar el aviso');return;}
+  const {data,error}=saved;
+  if(error){submitButtons.forEach(button=>button.disabled=false);updateRecordSubmitLabel();toast(errorText(error),'No se pudo guardar el aviso');return;}
+  submitButtons.forEach(button=>button.disabled=false);updateRecordSubmitLabel();
   notices.unshift(data);relatedNoticeMatch=null;$('#modal').classList.remove('open');event.target.reset();renderRows();renderComplaints();renderClientHistory();renderFinance();
   if(type!=='aviso'&&data.status==='Sale')await sendNoticeToConfiguredIntegrations(data);
   else if(type!=='aviso')toast('Se ha guardado sin enviar: cliente equivocado o llamada ajena a la empresa.','Registro guardado');
@@ -1943,6 +1947,7 @@ function wireUI() {
   $('#modal').addEventListener('click',e=>{if(e.target.id==='modal')e.currentTarget.classList.remove('open');});
   $('#fPhone').addEventListener('input',()=>{duplicatePhoneBypass=null;});
   $('#noticeForm').noValidate=true;
+  ['saveNotice','saveAndSchedule'].forEach(id=>$('#'+id).addEventListener('click',event=>{event.preventDefault();$('#noticeForm').requestSubmit(event.currentTarget);}));
   $('#noticeForm').addEventListener('submit',createNotice);
   $('#mobileNav').addEventListener('click',event=>{const button=event.target.closest('button[data-page]');if(button)showPage(button.dataset.page);});
   $('#mobileMoreLinks').addEventListener('click',event=>{const button=event.target.closest('button[data-page]');if(button)showPage(button.dataset.page);});
