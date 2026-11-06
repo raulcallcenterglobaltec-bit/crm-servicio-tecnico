@@ -1158,7 +1158,7 @@ async function createNotice(event) {
     managementReason=await requestNoSaleReason();
     if(managementReason===null)return;
   }
-  const submitButtons=$('#noticeForm button[type="submit"]');
+  const submitButtons=$$('#noticeForm button[type="submit"]');
   submitButtons.forEach(button=>button.disabled=true);
   const v=id=>$('#'+id).value.trim();
   const isPhoneNotice=type==='aviso',device=isPhoneNotice?v('fDevice'):'';const custom_fields={};
