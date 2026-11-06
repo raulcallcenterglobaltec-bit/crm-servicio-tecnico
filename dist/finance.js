@@ -14,6 +14,8 @@ function applyCompanyModules(){
   document.querySelectorAll('[data-fixed-tariff-only]').forEach(el=>el.style.display=fixed?'':'none');
   if(!work&&document.querySelector('#page-cobros.active'))showPage('avisos-landing');
 }
+function financeExistingNoticeIds(){return new Set(notices.filter(n=>n.notice_type==='aviso').map(n=>n.id));}
+function financePaymentsForExistingNotices(){const validIds=financeExistingNoticeIds();return financePayments.filter(p=>validIds.has(p.notice_id));}
 function financePaymentsFor(noticeId){return financePayments.filter(p=>p.notice_id===noticeId);}
 function financePaidTotal(noticeId){return financePaymentsFor(noticeId).reduce((sum,p)=>sum+Number(p.amount||0),0);}
 function financeState(notice){
@@ -41,7 +43,7 @@ function financeMoneyValue(value){return value===null||value===undefined||value=
 function financeFmtDate(value){if(!value)return '—';const d=new Date(String(value).slice(0,10)+'T12:00:00');return Number.isNaN(d.valueOf())?String(value):d.toLocaleDateString('es-ES');}
 function financePeriodPayments(range){
   const byNotice=new Map();
-  for(const payment of financePayments.filter(p=>p.paid_at>=range.from&&p.paid_at<=range.to))
+  for(const payment of financePaymentsForExistingNotices().filter(p=>p.paid_at>=range.from&&p.paid_at<=range.to))
     byNotice.set(payment.notice_id,(byNotice.get(payment.notice_id)||0)+Number(payment.amount||0));
   return byNotice;
 }
@@ -66,7 +68,8 @@ function renderFinance(){
   const root=$('#page-cobros');if(!root)return;
   if(financeLoadError){$('#financeJobs').innerHTML='<div class="finance-empty">No se pudieron cargar los pagos: '+esc(financeLoadError)+'</div>';return;}
   const range=financeRange(),rangeRows=financePeriodRows(),search=($('#financeSearch')?.value||'').trim().toLocaleLowerCase(),status=$('#financeStatus')?.value||'all';
-  const collectedInRange=financePayments.filter(p=>p.paid_at>=range.from&&p.paid_at<=range.to).reduce((sum,p)=>sum+Number(p.amount||0),0);
+  const periodPayments=financePaymentsForExistingNotices().filter(p=>p.paid_at>=range.from&&p.paid_at<=range.to);
+  const collectedInRange=periodPayments.reduce((sum,p)=>sum+Number(p.amount||0),0);
   const gross=rangeRows.reduce((sum,n)=>sum+(n.work_amount==null?0:Number(n.work_amount||0)),0);
   const materials=rangeRows.reduce((sum,n)=>sum+Number(n.material_cost||0),0),other=rangeRows.reduce((sum,n)=>sum+Number(n.other_cost||0),0);
   const outstanding=rangeRows.reduce((sum,n)=>sum+(n.work_amount==null?0:Math.max(Number(n.work_amount||0)-financePaidTotal(n.id),0)),0);
@@ -84,7 +87,7 @@ function renderFinance(){
     const actions=(canManageCurrentNotices()?'<button type="button" class="primary-btn" data-finance-edit="'+esc(n.id)+'">'+(amount===null?'Añadir importe y gastos':'Editar facturación y gastos')+'</button>'+(amount!==null&&balance>0?'<button type="button" class="outline-btn" data-finance-payment="'+esc(n.id)+'">Registrar pago</button>':''):'')+'<button type="button" class="outline-btn" data-finance-detail="'+esc(n.id)+'">Ver aviso</button>';
     return '<article class="finance-job"><div class="finance-job-head"><div><strong>'+esc(n.customer_name||'Cliente sin nombre')+'</strong><div class="finance-job-sub">'+esc(n.phone||'Sin teléfono')+' · '+esc(n.landing_id?landingName(n.landing_id):'Llamada telefónica')+' · '+financeFmtDate(financeNoticeDate(n))+'</div></div><span class="finance-state '+css+'">'+esc(state)+'</span></div>'+(detail?'<div class="finance-job-sub" style="margin-top:8px">'+esc(detail)+'</div>':'')+'<div class="finance-job-meta"><div><span>Importe trabajo</span><strong>'+(amount===null?'Sin completar':money(amount))+'</strong></div><div><span>Recibido / pendiente</span><strong>'+money(paid)+(balance===null?'':' / '+money(balance))+'</strong></div><div><span>Gasto materiales</span><strong>'+money(n.material_cost||0)+'</strong></div><div><span>Otros gastos</span><strong>'+money(n.other_cost||0)+'</strong></div><div><span>Factura</span><strong>'+(n.invoice_issued?'Sí · '+financeFmtDate(n.invoice_date)+(n.invoice_number?' · Nº '+esc(n.invoice_number):''):'No')+'</strong></div><div><span>Gastos anotados</span><strong>'+money(Number(n.material_cost||0)+Number(n.other_cost||0))+'</strong></div></div>'+paymentHtml+'<div class="finance-job-actions">'+actions+'</div></article>';
   }).join(''):'<div class="finance-empty">No hay trabajos que coincidan con los filtros.</div>';
-  const cards=[['Importe de trabajos',money(gross)],['Gastos de materiales',money(materials)],['Otros gastos',money(other)],['Beneficio estimado',money(gross-materials-other)],['Cobrado dentro del periodo',money(collectedInRange)],['Pendiente de cobro',money(outstanding)],['Trabajos sin importe',String(rangeRows.filter(n=>n.work_amount==null).length)],['Pagos registrados',String(financePayments.filter(p=>p.paid_at>=range.from&&p.paid_at<=range.to).length)]];
+  const cards=[['Importe de trabajos',money(gross)],['Gastos de materiales',money(materials)],['Otros gastos',money(other)],['Beneficio estimado',money(gross-materials-other)],['Cobrado dentro del periodo',money(collectedInRange)],['Pendiente de cobro',money(outstanding)],['Trabajos sin importe',String(rangeRows.filter(n=>n.work_amount==null).length)],['Pagos registrados',String(periodPayments.length)]];
   $('#financeReportRows').innerHTML=cards.map(row=>'<div class="finance-report-tile"><span>'+esc(row[0])+'</span><strong>'+esc(row[1])+'</strong></div>').join('')+'<div class="finance-report-note">El importe de trabajos se agrupa por fecha de realización; los cobros, por fecha de pago. Beneficio estimado = importe de trabajos − gastos registrados.</div>';
   root.querySelectorAll('[data-finance-edit]').forEach(b=>b.onclick=()=>openFinanceDetails(b.dataset.financeEdit));
   root.querySelectorAll('[data-finance-payment]').forEach(b=>b.onclick=()=>openFinancePayment(b.dataset.financePayment));
