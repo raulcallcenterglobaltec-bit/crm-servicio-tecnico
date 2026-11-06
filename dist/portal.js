@@ -80,3 +80,15 @@ document.addEventListener('DOMContentLoaded',()=>{
  const text=document.querySelector('#authScreen p');if(text)text.textContent='Administración central de empresas, bloques y configuración.';
  const signup=document.querySelector('#authSwitch');if(signup)signup.hidden=true;
 });
+const catalogVisibility=applyCompanyModules;
+applyCompanyModules=function(){
+ catalogVisibility();if(ADMIN_PORTAL||!currentCompany)return;
+ const active=document.querySelector('.page.active')?.id;
+ const route=active==='page-avisos'?(noticeSource==='phone'?'avisos-phone':'avisos-landing'):active?.replace('page-','');
+ if(route&&MODULE_CATALOG.some(m=>m[0]===route)&&!tenantModuleEnabled(route)){
+  const first=MODULE_CATALOG.find(m=>tenantModuleEnabled(m[0]));
+  if(first)showPage(first[0]);
+  else if(companyHasWorkFinance())showPage('cobros');
+  else{document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));let empty=document.querySelector('#page-no-modules');if(!empty){empty=document.createElement('section');empty.id='page-no-modules';empty.className='page';empty.innerHTML='<h1>Sin bloques habilitados</h1><p>El superadministrador debe asignar los bloques de esta empresa.</p>';document.querySelector('.content').append(empty);}empty.classList.add('active');}
+ }
+};
