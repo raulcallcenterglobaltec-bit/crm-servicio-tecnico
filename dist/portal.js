@@ -1,4 +1,5 @@
 
+let adminOperatingCompany=false;
 const MODULE_CATALOG=[
  ['avisos-landing','Avisos por formulario y landing'],['avisos-phone','Avisos por teléfono'],
  ['reclamaciones','Reclamaciones'],['anulaciones','Anulaciones'],['historial','Historial de clientes'],
@@ -11,24 +12,24 @@ applyCompanyModules=function(){
  document.querySelectorAll('[data-page]').forEach(button=>{
   const key=button.dataset.page;
   if(MODULE_CATALOG.some(m=>m[0]===key)||key==='cobros'){
-   button.hidden=ADMIN_PORTAL||(key==='cobros'?!companyHasWorkFinance():!tenantModuleEnabled(key));
+   button.hidden=(ADMIN_PORTAL&&!adminOperatingCompany)||(key==='cobros'?!companyHasWorkFinance():!tenantModuleEnabled(key));
   }
  });
- const mainLabel=document.querySelector('.sidebar .nav-label');if(mainLabel)mainLabel.hidden=ADMIN_PORTAL;
- const mobile=document.querySelector('#mobileNav');if(mobile)mobile.hidden=ADMIN_PORTAL;
- if(ADMIN_PORTAL){document.querySelectorAll('.sidebar [data-admin-only]').forEach(el=>el.hidden=false);}
+ const mainLabel=document.querySelector('.sidebar .nav-label');if(mainLabel)mainLabel.hidden=ADMIN_PORTAL&&!adminOperatingCompany;
+ const mobile=document.querySelector('#mobileNav');if(mobile)mobile.hidden=ADMIN_PORTAL&&!adminOperatingCompany;
+ if(ADMIN_PORTAL){document.querySelectorAll('.sidebar [data-admin-only]').forEach(el=>el.hidden=adminOperatingCompany);document.querySelectorAll('[data-page]').forEach(el=>{if(['empresas','usuarios','personalizacion','configuracion','integraciones'].includes(el.dataset.page))el.hidden=adminOperatingCompany;});}
 };
 const originalShowPage=showPage;
 showPage=function(name){
  const operational=MODULE_CATALOG.some(m=>m[0]===name)||name==='cobros';
- if(ADMIN_PORTAL&&operational){originalShowPage('empresas');return;}
+ if(ADMIN_PORTAL&&operational&&!adminOperatingCompany){originalShowPage('empresas');return;}
  if(!ADMIN_PORTAL&&operational&&!tenantModuleEnabled(name)){toast('Este bloque no está habilitado para tu empresa.');return;}
  originalShowPage(name);
  if(ADMIN_PORTAL){
-  document.title='Superadministración · CRM Gestión de avisos';
+  document.title=adminOperatingCompany&&currentCompany?currentCompany.name+' · CRM Gestión de avisos':'Superadministración · CRM Gestión de avisos';
   const head=document.querySelector('.page.active .page-head');
   if(head&&name!=='empresas'&&!head.querySelector('[data-return-admin]')){
-   const b=document.createElement('button');b.type='button';b.className='outline-btn';b.dataset.returnAdmin='true';b.textContent='Volver al panel central';b.onclick=()=>showPage('empresas');head.append(b);
+   const b=document.createElement('button');b.type='button';b.className='outline-btn';b.dataset.returnAdmin='true';b.textContent='Volver al panel central';b.onclick=returnToSuperadminPanel;head.append(b);
   }
   renderCompanyPicker();
  }
@@ -37,6 +38,7 @@ const originalRenderCompanies=renderCompanyPage;
 renderCompanyPage=function(){
  originalRenderCompanies();
  if(!ADMIN_PORTAL)return;
+ if(!adminOperatingCompany){const intro=document.querySelector('#page-empresas .page-head p');if(intro)intro.textContent='Elige el panel de superadministrador o entra en una empresa. Usa tu mismo usuario y contraseña para todas.';}
  const cards=document.querySelectorAll('#page-empresas .simple-grid > .placeholder-tile');
  cards.forEach((card,index)=>{
   const company=companies[index];if(!company)return;
@@ -59,11 +61,14 @@ renderCompanyPage=function(){
    row.append(input,document.createTextNode(label));box.append(row);
   });
   card.append(box);
+  const enter=document.createElement('button');enter.type='button';enter.className='primary-btn';enter.textContent='Entrar en esta empresa';enter.style.cssText='margin-top:12px';
+  enter.onclick=async()=>{adminOperatingCompany=true;currentCompany=company;await loadCompanyData();applyAccessPermissions();applyCompanyModules();renderCompanyPicker();const first=MODULE_CATALOG.find(item=>tenantModuleEnabled(item[0]));if(first)showPage(first[0]);else if(companyHasWorkFinance())showPage('cobros');else{adminOperatingCompany=false;renderCompanyPicker();showPage('empresas');toast('Esta empresa todavía no tiene bloques habilitados.','Sin bloques activos');}};
+  card.append(enter);
  });
 };
 const originalCompanyBrand=renderCompanyBrand;
 renderCompanyBrand=function(){
- if(!ADMIN_PORTAL){originalCompanyBrand();return;}
+ if(!ADMIN_PORTAL||adminOperatingCompany){originalCompanyBrand();return;}
  const brand=document.querySelector('.brand');if(brand)brand.innerHTML='<div class="brand-mark">A</div><div><strong>Superadministración</strong><small>Administración central</small></div>';
 };
 const originalCompanyTheme=applyCompanyTheme;
@@ -71,8 +76,9 @@ applyCompanyTheme=function(color){originalCompanyTheme(ADMIN_PORTAL?'#5267e8':co
 const originalCompanyPicker=renderCompanyPicker;
 renderCompanyPicker=function(){
  if(!ADMIN_PORTAL){originalCompanyPicker();return;}
- const el=document.querySelector('.company-select');if(el){el.hidden=false;el.innerHTML='<span class="company-badge">A</span><span>'+esc(currentCompany?'Configurando: '+currentCompany.name:'Administración global')+'</span>';el.onclick=()=>showPage('empresas');}
+ const el=document.querySelector('.company-select');if(el){el.hidden=false;el.innerHTML='<span class="company-badge">'+(adminOperatingCompany&&currentCompany?esc((currentCompany.name||'').slice(0,2).toUpperCase()):'A')+'</span><span>'+esc(adminOperatingCompany&&currentCompany?'Empresa: '+currentCompany.name:currentCompany?'Configurando: '+currentCompany.name:'Administración global')+'</span>';el.onclick=()=>adminOperatingCompany?returnToSuperadminPanel():showPage('empresas');}
  renderCompanyBrand();
+ const back=document.querySelector('#adminBackToPanel');if(adminOperatingCompany){if(!back){const b=document.createElement('button');b.id='adminBackToPanel';b.type='button';b.className='outline-btn';b.textContent='Panel superadministrador';b.onclick=returnToSuperadminPanel;document.querySelector('.top-actions')?.prepend(b);}}else back?.remove();
 };
 document.addEventListener('DOMContentLoaded',()=>{
  if(!ADMIN_PORTAL)return;
@@ -112,3 +118,29 @@ renderReport=function(){
  const description=document.querySelector('#page-informes .page-head p');if(description)description.textContent='Resultados de los bloques habilitados para esta empresa.';
  document.querySelectorAll('#page-informes .chart-grid').forEach(grid=>{grid.hidden=Array.from(grid.querySelectorAll(':scope > article')).every(card=>card.hidden);grid.style.gridTemplateColumns='repeat(auto-fit,minmax(min(100%,300px),1fr))';});
 };
+
+function returnToSuperadminPanel(){
+ adminOperatingCompany=false;currentCompany=null;
+ applyAccessPermissions();applyCompanyModules();renderCompanyPicker();renderCompanyPage();showPage('empresas');renderCompanyPicker();
+}
+function syncFixedTariffSettings(){
+ const enabled=currentCompany?.show_tariff_reports!==false;
+ const phone=document.querySelector('#page-configuracion [data-settings-tab="phone-tariffs"]');
+ const landing=document.querySelector('#page-configuracion [data-settings-tab="tariffs"]');
+ if(phone)phone.hidden=!enabled;if(landing)landing.hidden=!enabled;
+ const phonePanel=document.querySelector('#page-configuracion [data-settings-panel="phone-tariffs"]');
+ const landingPanel=document.querySelector('#page-configuracion [data-settings-panel="tariffs"]');
+ if(phonePanel)phonePanel.hidden=!enabled;if(landingPanel)landingPanel.hidden=!enabled;
+ const active=document.querySelector('#page-configuracion [data-settings-tab].active');
+ if(!enabled&&active&&['phone-tariffs','tariffs'].includes(active.dataset.settingsTab))showSettingsTab('phone-fields');
+}
+const showSettingsWithTariffGate=showSettingsTab;
+showSettingsTab=function(name){
+ if(currentCompany?.show_tariff_reports===false&&['phone-tariffs','tariffs'].includes(name)){
+  toast('Las tarifas fijas están desactivadas para esta empresa.','Apartado deshabilitado');
+  showSettingsWithTariffGate('phone-fields');return;
+ }
+ showSettingsWithTariffGate(name);
+};
+const showPageWithTariffSettings=showPage;
+showPage=function(name){showPageWithTariffSettings(name);if(name==='configuracion')syncFixedTariffSettings();};
