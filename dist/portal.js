@@ -92,3 +92,23 @@ applyCompanyModules=function(){
   else{document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));let empty=document.querySelector('#page-no-modules');if(!empty){empty=document.createElement('section');empty.id='page-no-modules';empty.className='page';empty.innerHTML='<h1>Sin bloques habilitados</h1><p>El superadministrador debe asignar los bloques de esta empresa.</p>';document.querySelector('.content').append(empty);}empty.classList.add('active');}
  }
 };
+function reportRecordEnabled(record){
+ const key=record.notice_type==='reclamacion'?'reclamaciones':record.notice_type==='anulacion'?'anulaciones':record.landing_id?'avisos-landing':'avisos-phone';
+ return tenantModuleEnabled(key);
+}
+const reportActivityBeforeModules=getReportActivityRows;
+getReportActivityRows=function(){return reportActivityBeforeModules().filter(reportRecordEnabled);};
+const renderReportBeforeModules=renderReport;
+renderReport=function(){
+ renderReportBeforeModules();
+ const landing=tenantModuleEnabled('avisos-landing'),phone=tenantModuleEnabled('avisos-phone'),claims=tenantModuleEnabled('reclamaciones'),cancellations=tenantModuleEnabled('anulaciones');
+ const hideCard=(selector,hide)=>{const card=document.querySelector(selector)?.closest('article');if(card)card.hidden=hide;};
+ hideCard('#reportPhoneResults',!phone);hideCard('#reportLandingResults',!landing);hideCard('#reportBestLanding',!landing);
+ hideCard('#reportComplaintResults',!claims&&!cancellations);
+ const followups=document.querySelectorAll('#reportComplaintResults .report-source-card');if(followups[0])followups[0].hidden=!claims;if(followups[1])followups[1].hidden=!cancellations;
+ const title=document.querySelector('#reportComplaintResults')?.closest('article')?.querySelector('h2');if(title)title.textContent=claims&&cancellations?'Reclamaciones y anulaciones':claims?'Reclamaciones':'Anulaciones';
+ const filter=document.querySelector('#reportLanding');if(filter)filter.hidden=!landing;
+ const foot=document.querySelector('#reportTotal')?.closest('article')?.querySelector('.metric-foot');if(foot)foot.textContent=landing&&phone?'Formulario y teléfono':landing?'Formulario web':phone?'Teléfono':'Sin origen de avisos habilitado';
+ const description=document.querySelector('#page-informes .page-head p');if(description)description.textContent='Resultados de los bloques habilitados para esta empresa.';
+ document.querySelectorAll('#page-informes .chart-grid').forEach(grid=>{grid.hidden=Array.from(grid.querySelectorAll(':scope > article')).every(card=>card.hidden);grid.style.gridTemplateColumns='repeat(auto-fit,minmax(min(100%,300px),1fr))';});
+};
