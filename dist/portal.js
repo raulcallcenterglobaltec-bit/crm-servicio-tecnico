@@ -63,9 +63,9 @@ renderCompanyPage=function(){
    row.append(input,document.createTextNode(label));box.append(row);
   });
   card.append(box);
-  const enter=document.createElement('button');enter.type='button';enter.className='primary-btn';enter.textContent='Entrar en esta empresa';enter.style.cssText='margin-top:12px';
+  const enter=document.createElement('button');enter.type='button';enter.className='primary-btn';enter.textContent='Entrar en esta empresa';enter.style.cssText='margin-top:4px;width:max-content;max-width:100%';
   enter.onclick=async()=>{adminOperatingCompany=true;currentCompany=company;await loadCompanyData();applyAccessPermissions();applyCompanyModules();renderCompanyPicker();const first=MODULE_CATALOG.find(item=>tenantModuleEnabled(item[0]));if(first)showPage(first[0]);else if(companyHasWorkFinance())showPage('cobros');else{adminOperatingCompany=false;renderCompanyPicker();showPage('empresas');toast('Esta empresa todavía no tiene bloques habilitados.','Sin bloques activos');}};
-  card.append(enter);
+  card.insertBefore(enter,card.children[1]||null);
  });
 };
 const originalCompanyBrand=renderCompanyBrand;
