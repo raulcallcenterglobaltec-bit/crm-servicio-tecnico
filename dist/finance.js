@@ -93,10 +93,6 @@ function renderFinance(){
   root.querySelectorAll('[data-finance-payment]').forEach(b=>b.onclick=()=>openFinancePayment(b.dataset.financePayment));
   root.querySelectorAll('[data-finance-delete-payment]').forEach(b=>b.onclick=()=>deleteFinancePayment(b.dataset.financeDeletePayment));
   root.querySelectorAll('[data-finance-detail]').forEach(b=>b.onclick=()=>showDetails(b.dataset.financeDetail));
-  root.querySelectorAll('[data-finance-drill]').forEach(card=>{
-    const activate=()=>{const panel=$('#financeDrilldown');panel.dataset.kind=card.dataset.financeDrill;renderFinanceDrilldown(panel.dataset.kind,rangeRows,range);};
-    card.onclick=activate;card.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();activate();}};
-  });
 }
 async function openFinanceDetails(noticeId){
   if(!canManageCurrentNotices())return;const n=notices.find(item=>item.id===noticeId);if(!n)return;
