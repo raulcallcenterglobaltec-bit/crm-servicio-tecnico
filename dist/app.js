@@ -421,7 +421,7 @@ function filteredNotices(report=false) {
     const sourceMatch=n.notice_type==='aviso'&&(report||((n.created_by?'phone':'landing')===noticeSource));
     const d=dateOnly(n.received_at), day=new Date(d+'T12:00:00').getDay();
     const allText=[n.customer_name,n.phone,n.email,n.device,n.brand,n.issue,n.locality,landingName(n.landing_id),JSON.stringify(n.custom_fields||{})].join(' ').toLowerCase();
-    return sourceMatch&&inDatePeriod(d,period,exact,from,to)&&(weekday==='all'||day===Number(weekday))&&(status==='all'||n.status===status)&&(landing==='all'||n.landing_id===landing)&&(!query||allText.includes(query));
+    return sourceMatch&&inDatePeriod(d,period,exact,from,to)&&(weekday==='all'||day===Number(weekday))&&(status==='all'||n.status===status)&&((!report&&noticeSource==='phone')||landing==='all'||n.landing_id===landing)&&(!query||allText.includes(query));
   });
 }
 function noticeFieldsForCards() {
@@ -585,6 +585,24 @@ function clientHistoryGroups() {
   }
   return [...groups.values()].sort((a,b)=>new Date(b.latest)-new Date(a.latest));
 }
+function historyModuleEnabled(key){return currentCompany?.enabled_modules?.[key]!==false;}
+function historyDateMatches(row){
+  const from=$('#historyDateFrom')?.value||'',to=$('#historyDateTo')?.value||'',date=dateOnly(row.received_at);
+  return (!from||date>=from)&&(!to||date<=to);
+}
+function historyNoticeMatches(row){
+  if(row.notice_type!=='aviso'||!historyDateMatches(row))return false;
+  const status=$('#historyStatusFilter')?.value||'all';
+  if(status==='pending')return row.status==='Nuevo'||row.status==='Pendiente de localizar';
+  return status==='all'||row.status===status;
+}
+function historyFollowupEnabled(row){return row.notice_type==='reclamacion'?historyModuleEnabled('reclamaciones'):row.notice_type==='anulacion'?historyModuleEnabled('anulaciones'):false;}
+function historyVisibleRoots(group){return group.records.filter(historyNoticeMatches);}
+function historyVisibleFollowups(group,roots=historyVisibleRoots(group)){
+  const rootIds=new Set(roots.map(row=>row.id));
+  const status=$('#historyStatusFilter')?.value||'all';
+  return group.records.filter(row=>historyFollowupEnabled(row)&&historyDateMatches(row)&&(row.related_notice_id?rootIds.has(row.related_notice_id):status==='all'));
+}
 function historyRecordStatus(row) {
   if(row.notice_type==='aviso')return statusLabel(row.status||'Nuevo');
   return row.status==='Sale'?'Envío solicitado':row.status==='No sale'?'No es nuestra (cliente equivocado)':'Pendiente';
@@ -598,14 +616,18 @@ function renderClientHistory() {
   const results=$('#historyResults');if(!results)return;
   const input=$('#historySearch'),query=(input?.value||'').trim(),needle=query.toLowerCase(),digits=normalizePhoneForMatch(query);
   const groups=clientHistoryGroups();
-  const matches=query
-    ? groups.filter(group=>group.searchText.includes(needle)||(digits.length>=1&&group.searchPhones.some(phone=>phone.includes(digits))))
-    : groups;
+  const matches=groups.filter(group=>{
+    const textMatch=!query||group.searchText.includes(needle)||(digits.length>=1&&group.searchPhones.some(phone=>phone.includes(digits)));
+    return textMatch&&(historyVisibleRoots(group).length>0||historyVisibleFollowups(group).length>0);
+  });
   if(!matches.length){selectedHistoryKey=null;results.innerHTML='<div class="empty">No encontramos un cliente con esos datos.</div>';renderClientHistoryDetail(groups);return;}
   if(!matches.some(group=>group.key===selectedHistoryKey))selectedHistoryKey=matches.length===1?matches[0].key:null;
   results.innerHTML=matches.map(group=>{
-    const avisos=group.records.filter(n=>n.notice_type==='aviso').length,reclamaciones=group.records.filter(n=>n.notice_type==='reclamacion').length,anulaciones=group.records.filter(n=>n.notice_type==='anulacion').length;
-    return `<button type="button" class="history-result ${group.key===selectedHistoryKey?'active':''}" data-history-client="${esc(group.key)}"><span class="history-result-name">${esc(group.name)}</span><span class="history-result-phone">${esc(group.phone||'Sin teléfono')}</span><span class="history-result-counts"><span class="history-pill-notices">${avisos} avisos</span><span class="history-pill-complaints">${reclamaciones} reclamaciones</span><span>${anulaciones} anulaciones</span></span></button>`;
+    const avisos=historyVisibleRoots(group).length,followups=historyVisibleFollowups(group);
+    const counts=[`<span class="history-pill-notices">${avisos} ${avisos===1?'aviso':'avisos'}</span>`];
+    if(historyModuleEnabled('reclamaciones')){const count=followups.filter(n=>n.notice_type==='reclamacion').length;counts.push(`<span class="history-pill-complaints">${count} ${count===1?'reclamación':'reclamaciones'}</span>`);}
+    if(historyModuleEnabled('anulaciones')){const count=followups.filter(n=>n.notice_type==='anulacion').length;counts.push(`<span>${count} ${count===1?'anulación':'anulaciones'}</span>`);}
+    return `<button type="button" class="history-result ${group.key===selectedHistoryKey?'active':''}" data-history-client="${esc(group.key)}"><span class="history-result-name">${esc(group.name)}</span><span class="history-result-phone">${esc(group.phone||'Sin teléfono')}</span><span class="history-result-counts">${counts.join('')}</span></button>`;
   }).join('');
   $$('[data-history-client]',results).forEach(button=>button.addEventListener('click',()=>{selectedHistoryKey=button.dataset.historyClient;renderClientHistory();}));
   renderClientHistoryDetail(matches);
@@ -614,16 +636,25 @@ function renderClientHistoryDetail(availableGroups=clientHistoryGroups()) {
   const host=$('#historyDetail');if(!host)return;
   const group=availableGroups.find(item=>item.key===selectedHistoryKey);
   if(!group){host.innerHTML='<article class="card empty">Selecciona un cliente para ver su historial.</article>';return;}
-  const records=group.records,roots=records.filter(n=>n.notice_type==='aviso').sort((a,b)=>new Date(b.received_at)-new Date(a.received_at)),rootIds=new Set(roots.map(n=>n.id));
-  const followups=records.filter(n=>n.notice_type==='reclamacion'||n.notice_type==='anulacion'),linked=followups.filter(n=>rootIds.has(n.related_notice_id)),unlinked=followups.filter(n=>!rootIds.has(n.related_notice_id));
-  const counts=`${roots.length} ${roots.length===1?'aviso':'avisos'} · ${followups.filter(n=>n.notice_type==='reclamacion').length} ${followups.filter(n=>n.notice_type==='reclamacion').length===1?'reclamación':'reclamaciones'} · ${followups.filter(n=>n.notice_type==='anulacion').length} ${followups.filter(n=>n.notice_type==='anulacion').length===1?'anulación':'anulaciones'}`;
+  const records=group.records,allRoots=records.filter(n=>n.notice_type==='aviso'),roots=historyVisibleRoots(group).sort((a,b)=>new Date(b.received_at)-new Date(a.received_at)),rootIds=new Set(roots.map(n=>n.id)),allRootIds=new Set(allRoots.map(n=>n.id));
+  const followups=historyVisibleFollowups(group,roots),linked=followups.filter(n=>rootIds.has(n.related_notice_id)),unlinked=followups.filter(n=>!n.related_notice_id||!allRootIds.has(n.related_notice_id));
+  const countParts=[`${roots.length} ${roots.length===1?'aviso':'avisos'}`];
+  if(historyModuleEnabled('reclamaciones')){const count=followups.filter(n=>n.notice_type==='reclamacion').length;countParts.push(`${count} ${count===1?'reclamación':'reclamaciones'}`);}
+  if(historyModuleEnabled('anulaciones')){const count=followups.filter(n=>n.notice_type==='anulacion').length;countParts.push(`${count} ${count===1?'anulación':'anulaciones'}`);}
+  const counts=countParts.join(' · ');
   const followupMarkup=row=>`<div class="history-followup-entry"><div class="history-record-head"><div><strong>${historyRecordType(row)} · ${esc(historyRecordStatus(row))}</strong><small>${esc(formatDate(row.received_at))}</small></div><button type="button" class="history-open-record" data-history-open="${esc(row.id)}">Ver ficha</button></div><p>${esc(row.issue||'Sin detalle indicado')}</p></div>`;
   const noticeCards=roots.map(row=>{
     const source=row.created_by?'Llamada telefónica':landingName(row.landing_id),children=linked.filter(child=>child.related_notice_id===row.id).sort((a,b)=>new Date(b.received_at)-new Date(a.received_at));
     const details=[row.device&&`<span><b>Aparato:</b> ${esc(row.device)}</span>`,row.locality&&`<span><b>Localidad:</b> ${esc(row.locality)}</span>`,row.brand&&`<span><b>Marca:</b> ${esc(row.brand)}</span>`,row.issue&&`<span><b>Detalle:</b> ${esc(row.issue)}</span>`].filter(Boolean).join('');
-    return `<article class="card history-record-card"><div class="history-record-head"><div><strong>Aviso técnico · ${esc(row.device||'Aparato sin indicar')}</strong><small>${esc(formatDate(row.received_at))} · ${esc(source)}</small></div><button type="button" class="history-open-record" data-history-open="${esc(row.id)}">Ver ficha</button></div><div class="history-record-meta"><span class="history-pill">${esc(historyRecordStatus(row))}</span><span class="history-pill">${esc(row.category||'Categoría sin indicar')}</span>${row.unit_price>0?`<span class="history-pill">${money(row.unit_price)}</span>`:''}</div><div class="history-record-details">${details||'<span>Sin datos adicionales del aviso.</span>'}</div><div class="history-followups"><h3>Reclamaciones y anulaciones vinculadas (${children.length})</h3>${children.length?children.map(followupMarkup).join(''):'<div class="history-empty-inline">Este aviso todavía no tiene reclamaciones ni anulaciones vinculadas.</div>'}</div></article>`;
+    const visibleChildren=children.filter(child=>historyFollowupEnabled(child)&&historyDateMatches(child));
+    const enabledTypes=[historyModuleEnabled('reclamaciones')&&'reclamaciones',historyModuleEnabled('anulaciones')&&'anulaciones'].filter(Boolean);
+    const followupTitle=enabledTypes.length===2?'Seguimientos vinculados':enabledTypes[0]==='reclamaciones'?'Reclamaciones vinculadas':'Anulaciones vinculadas';
+    const followupBlock=enabledTypes.length?`<div class="history-followups"><h3>${followupTitle} (${visibleChildren.length})</h3>${visibleChildren.length?visibleChildren.map(followupMarkup).join(''):'<div class="history-empty-inline">No hay registros vinculados en las fechas seleccionadas.</div>'}</div>`:'';
+    return `<article class="card history-record-card"><div class="history-record-head"><div><strong>Aviso técnico · ${esc(row.device||'Aparato sin indicar')}</strong><small>${esc(formatDate(row.received_at))} · ${esc(source)}</small></div><button type="button" class="history-open-record" data-history-open="${esc(row.id)}">Ver ficha</button></div><div class="history-record-meta"><span class="history-pill">${esc(historyRecordStatus(row))}</span><span class="history-pill">${esc(row.category||'Categoría sin indicar')}</span>${row.unit_price>0?`<span class="history-pill">${money(row.unit_price)}</span>`:''}</div><div class="history-record-details">${details||'<span>Sin datos adicionales del aviso.</span>'}</div>${followupBlock}</article>`;
   }).join('');
-  host.innerHTML=`<article class="card history-summary"><h2>${esc(group.name)}</h2><p>${esc(group.phone||'Sin teléfono')} · Historial completo de esta empresa</p><div class="history-summary-counts"><span class="history-pill history-pill-notices">${counts}</span><span class="history-pill">${records.length} registros en total</span></div></article>${noticeCards||'<article class="card empty">Este cliente todavía no tiene avisos técnicos registrados.</article>'}${unlinked.length?`<article class="history-unlinked"><h3>Reclamaciones o anulaciones sin aviso vinculado (${unlinked.length})</h3><p style="margin:0 0 7px;color:#7d6b48;font-size:10px">Estos registros se buscaron por el teléfono, pero no se vinculó un aviso concreto al registrarlos.</p>${unlinked.sort((a,b)=>new Date(b.received_at)-new Date(a.received_at)).map(followupMarkup).join('')}</article>`:''}`;
+  const historyExtras=historyModuleEnabled('reclamaciones')||historyModuleEnabled('anulaciones');
+  const unlinkedTitle=historyModuleEnabled('reclamaciones')&&historyModuleEnabled('anulaciones')?'Reclamaciones o anulaciones sin aviso vinculado':historyModuleEnabled('reclamaciones')?'Reclamaciones sin aviso vinculado':'Anulaciones sin aviso vinculado';
+  host.innerHTML=`<article class="card history-summary"><h2>${esc(group.name)}</h2><p>${esc(group.phone||'Sin teléfono')} · Historial de esta empresa</p><div class="history-summary-counts"><span class="history-pill history-pill-notices">${counts}</span>${historyExtras?`<span class="history-pill">${roots.length+followups.length} registros filtrados</span>`:''}</div></article>${noticeCards||'<article class="card empty">No hay avisos para el estado y las fechas seleccionadas.</article>'}${unlinked.length?`<article class="history-unlinked"><h3>${unlinkedTitle} (${unlinked.length})</h3><p style="margin:0 0 7px;color:#7d6b48;font-size:10px">Estos registros se buscaron por el teléfono, pero no se vinculó un aviso concreto al registrarlos.</p>${unlinked.sort((a,b)=>new Date(b.received_at)-new Date(a.received_at)).map(followupMarkup).join('')}</article>`:''}`;
   $$('[data-history-open]',host).forEach(button=>button.addEventListener('click',()=>showDetails(button.dataset.historyOpen)));
 }
 function canonicalNoticeStatus(value) {
@@ -1876,7 +1907,7 @@ function showPage(name) {
   $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+pageName));
   $$('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
   document.querySelectorAll('#mobileNav [data-page],#mobileMorePanel [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
-  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',cobros:'Cobros',empresas:'Superadministración',reclamaciones:'Reclamaciones',anulaciones:'Anulaciones',historial:'Historial de clientes',agenda:'Agenda - Citas',usuarios:'Usuarios y permisos',personalizacion:'Personalización',configuracion:'Configuración',integraciones:'Integraciones'};
+  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',cobros:'Facturación y cobros',empresas:'Superadministración',reclamaciones:'Reclamaciones',anulaciones:'Anulaciones',historial:'Historial de clientes',agenda:'Agenda - Citas',usuarios:'Usuarios y permisos',personalizacion:'Personalización',configuracion:'Configuración',integraciones:'Integraciones'};
   $('#breadcrumb').textContent='Panel / '+labels[name];
   if(pageName==='avisos'){
     noticeSource=name==='avisos-phone'?'phone':'landing';
@@ -1886,10 +1917,17 @@ function showPage(name) {
     $('#page-avisos .page-head p').textContent=phone?'Registra y gestiona los avisos que recibes por llamada telefónica.':'Solicitudes recibidas desde formularios web.';
     $('#newNotice').style.display=phone?'inline-flex':'none';
     $('#latestNoticesTitle').textContent=phone?'Últimos avisos por teléfono':'Últimos avisos por formulario';
+    $('#landingFilter').hidden=phone;
+    const latestSubtitle=$('#latestNoticesTitle').parentElement.querySelector('p');
+    if(latestSubtitle)latestSubtitle.textContent=phone?'Avisos registrados tras llamadas telefónicas.':'Solicitudes recibidas desde formularios web.';
     renderRows();
   }
   if(pageName==='reclamaciones'||pageName==='anulaciones')renderComplaints();
-  if(pageName==='historial')renderClientHistory();
+  if(pageName==='historial'){
+    const desc=$('#page-historial .page-head p');
+    if(desc)desc.textContent=historyModuleEnabled('reclamaciones')||historyModuleEnabled('anulaciones')?'Busca por teléfono o nombre y filtra los avisos por estado y fechas; los seguimientos aparecen si esos bloques están habilitados.':'Busca por teléfono o nombre y filtra los avisos por estado y fechas.';
+    renderClientHistory();
+  }
   if(pageName==='agenda')renderAgenda();
   if(pageName==='cobros')renderFinance();
   $('#sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'});
@@ -1926,6 +1964,7 @@ function wireUI() {
   setupDate('main');setupDate('report');
   ['tableSearch','globalSearch'].forEach(id=>$('#'+id).addEventListener('input',renderRows));
   $('#historySearch').addEventListener('input',renderClientHistory);
+  ['historyStatusFilter','historyDateFrom','historyDateTo'].forEach(id=>$('#'+id).addEventListener('change',renderClientHistory));
   ['statusFilter','landingFilter','weekdayFilter'].forEach(id=>$('#'+id).addEventListener('change',renderRows));
   ['reportWeekday','reportLanding','reportStatus'].forEach(id=>$('#'+id).addEventListener('change',renderReport));
   $$('[data-notice-view]').forEach(button=>button.addEventListener('click',()=>setNoticeView(button.dataset.noticeView)));
