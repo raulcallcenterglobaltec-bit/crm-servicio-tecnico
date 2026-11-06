@@ -536,14 +536,21 @@ function renderRows() {
 }
 function renderComplaints() {
   const lists=[
-    {type:'reclamacion',body:'#complaintRows',count:'#complaintCount',empty:'#complaintEmpty'},
-    {type:'anulacion',body:'#cancellationRows',count:'#cancellationCount',empty:'#cancellationEmpty'}
+    {type:'reclamacion',body:'#complaintRows',count:'#complaintCount',empty:'#complaintEmpty',search:'#complaintSearch',label:'reclamaciones'},
+    {type:'anulacion',body:'#cancellationRows',count:'#cancellationCount',empty:'#cancellationEmpty',search:'#cancellationSearch',label:'anulaciones'}
   ];
   for(const list of lists){
     const body=$(list.body);if(!body)continue;
-    const rows=notices.filter(n=>n.notice_type===list.type).sort((x,y)=>new Date(y.received_at)-new Date(x.received_at));
-    $(list.count).textContent=rows.length+' '+(rows.length===1?'registro':'registros');
-    $(list.empty).hidden=rows.length>0;
+    const allRows=notices.filter(n=>n.notice_type===list.type);
+    const rawSearch=$(list.search)?.value||'',query=rawSearch.trim().toLocaleLowerCase(),phoneQuery=rawSearch.replace(/\D/g,'');
+    const rows=allRows.filter(n=>{
+      if(!query)return true;
+      const searchable=[n.customer_name,n.phone,n.email,n.locality,n.issue].filter(Boolean).join(' ').toLocaleLowerCase();
+      const phone=String(n.phone||'').replace(/\D/g,'');
+      return searchable.includes(query)||(phoneQuery.length>=3&&phone.includes(phoneQuery));
+    }).sort((x,y)=>new Date(y.received_at)-new Date(x.received_at));
+    $(list.count).textContent=query?rows.length+' de '+allRows.length+' '+(allRows.length===1?'registro':'registros'):allRows.length+' '+(allRows.length===1?'registro':'registros');
+    const empty=$(list.empty);empty.hidden=rows.length>0;empty.textContent=query?'No se encontraron '+list.label+' con esa búsqueda.':'No hay '+list.label+' registradas.';
     body.innerHTML=rows.map(n=>'<tr><td>'+esc(formatDate(n.received_at))+'</td><td><div class="client-cell"><span class="client-initial">'+esc((n.customer_name||'??').slice(0,2).toUpperCase())+'</span><div><strong>'+esc(n.customer_name||'Sin nombre')+'</strong><small>'+esc(n.locality||'')+'</small></div></div></td><td>'+esc(n.phone||'—')+'</td><td class="complaint-detail">'+esc(n.issue||'—')+'</td><td>'+(n.status==='Sale'?'Envío solicitado':n.status==='No sale'?'No es nuestra (cliente equivocado)':'Registro anterior')+'</td><td><div class="notice-row-actions"><button class="row-action" data-record-detail="'+esc(n.id)+'" aria-label="Ver datos" title="Ver datos">···</button>'+(isSuperAdmin&&list.type==='reclamacion'?'<button class="row-action notice-delete" data-delete-complaint="'+esc(n.id)+'" aria-label="Eliminar reclamación" title="Eliminar reclamación">×</button>':'')+'</div></td></tr>').join('');
     $$('[data-record-detail]',body).forEach(button=>button.onclick=()=>showDetails(button.dataset.recordDetail));
     $$('[data-delete-complaint]',body).forEach(button=>button.onclick=()=>deleteComplaint(button.dataset.deleteComplaint));
@@ -1980,6 +1987,8 @@ function wireUI() {
   setupDate('main');setupDate('report');
   ['tableSearch','globalSearch'].forEach(id=>$('#'+id).addEventListener('input',renderRows));
   $('#historySearch').addEventListener('input',renderClientHistory);
+  $('#complaintSearch').addEventListener('input',renderComplaints);
+  $('#cancellationSearch').addEventListener('input',renderComplaints);
   ['historyStatusFilter','historyDateFrom','historyDateTo'].forEach(id=>$('#'+id).addEventListener('change',renderClientHistory));
   ['statusFilter','landingFilter','weekdayFilter'].forEach(id=>$('#'+id).addEventListener('change',renderRows));
   ['reportWeekday','reportLanding','reportStatus'].forEach(id=>$('#'+id).addEventListener('change',renderReport));
