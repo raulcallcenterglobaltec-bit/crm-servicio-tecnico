@@ -1039,13 +1039,13 @@ function syncDefaultFields() {
     const sourceFields=noticeSource==='phone'?fieldsForPhone():fieldsForLanding($('#fLanding')?.value||null);
     const field=sourceFields.find(f=>f.field_key===code);
     el.hidden=!!field&&!field.visible_in_form;
-    if(field){const label=$('label',el);if(label)label.textContent=field.label;const control=$('input,select,textarea',el);if(control){control.required=field.required;if(field.field_type==='phone'&&control.tagName==='INPUT')control.type='tel';if(field.field_type==='email'&&control.tagName==='INPUT')control.type='email';if(field.field_type==='number'&&control.tagName==='INPUT')control.type='number';if(code==='device'&&control.tagName==='SELECT'&&field.options?.length)control.innerHTML=field.options.map(v=>`<option>${esc(v)}</option>`).join('');}}
+    if(field){const label=$('label',el);if(label)label.textContent=field.label;const control=$('input,select,textarea',el);if(control){control.required=field.required&&field.visible_in_form;if(field.field_type==='phone'&&control.tagName==='INPUT')control.type='tel';if(field.field_type==='email'&&control.tagName==='INPUT')control.type='email';if(field.field_type==='number'&&control.tagName==='INPUT')control.type='number';if(code==='device'&&control.tagName==='SELECT'&&field.options?.length)control.innerHTML=field.options.map(v=>`<option>${esc(v)}</option>`).join('');}}
   });
 }
 function updateRecordFormMode() {
   const type=$('#fRecordType')?.value||'aviso',nonNotice=type!=='aviso';
   $('#recordTypeWrap').hidden=true;
-  const addressField=$('[data-field-code="address"]');if(addressField)addressField.hidden=!nonNotice;
+  const addressField=$('[data-field-code="address"]');if(addressField){addressField.hidden=!nonNotice;if(!nonNotice){const control=$('input,select,textarea',addressField);if(control)control.required=false;}}
   $('#statusFieldWrap').hidden=noticeSource!=='phone';
   const status=$('#fStatus'),statusLabel=$('#fStatusLabel');
   if(status&&statusLabel&&nonNotice){
@@ -1059,8 +1059,8 @@ function updateRecordFormMode() {
     status.value='Nuevo';
   }
   const deviceField=$('[data-field-code="device"]'),brandField=$('[data-field-code="brand"]'),issueField=$('[data-field-code="issue"]');
-  if(deviceField&&nonNotice)deviceField.hidden=true;
-  if(brandField&&nonNotice)brandField.hidden=true;
+  if(deviceField){deviceField.hidden=nonNotice;if(nonNotice){const control=$('input,select,textarea',deviceField);if(control)control.required=false;}}
+  if(brandField){brandField.hidden=nonNotice;if(nonNotice){const control=$('input,select,textarea',brandField);if(control)control.required=false;}}
   if(issueField&&nonNotice)issueField.hidden=false;
   const issueLabel=$('#fIssueLabel'),issue=$('#fIssue');
   const configuredIssueLabel=fieldsForPhone().find(f=>f.field_key==='issue')?.label;
@@ -1140,6 +1140,9 @@ function showDuplicatePhoneDialog(matches,normalizedPhone,submitAction='saveNoti
 }
 async function createNotice(event) {
   event.preventDefault();
+  const form=event.currentTarget;
+  const invalid=Array.from(form.elements).find(control=>control.willValidate&&!control.disabled&&!control.checkValidity()&&!control.closest('[hidden]'));
+  if(invalid){const wrapper=invalid.closest('[data-field-code],.field');const label=wrapper?.querySelector('label,span')?.textContent?.trim()||invalid.labels?.[0]?.textContent?.trim()||'un dato obligatorio';toast('Completa el campo «'+label+'» para guardar el aviso.','Falta un dato obligatorio');invalid.focus();return;}
   const type=$('#fRecordType').value||'aviso';
   const saveAndSchedule=event.submitter?.id==='saveAndSchedule';
   if(saveAndSchedule&&(noticeSource!=='phone'||type!=='aviso'||$('#fStatus').value!=='Sale')){toast('Para guardar y agendar, marca primero el aviso como sacado.','Aviso todavía no sacado');return;}
@@ -1939,6 +1942,7 @@ function wireUI() {
   $('#cancelModal').addEventListener('click',()=>$('#modal').classList.remove('open'));
   $('#modal').addEventListener('click',e=>{if(e.target.id==='modal')e.currentTarget.classList.remove('open');});
   $('#fPhone').addEventListener('input',()=>{duplicatePhoneBypass=null;});
+  $('#noticeForm').noValidate=true;
   $('#noticeForm').addEventListener('submit',createNotice);
   $('#mobileNav').addEventListener('click',event=>{const button=event.target.closest('button[data-page]');if(button)showPage(button.dataset.page);});
   $('#mobileMoreLinks').addEventListener('click',event=>{const button=event.target.closest('button[data-page]');if(button)showPage(button.dataset.page);});
