@@ -8,17 +8,26 @@ Añadir al CRM Gestión de avisos un módulo opcional por empresa que lleve el t
 
 El módulo se habilita por empresa desde Superadministración. Por defecto queda desactivado y sus páginas, acciones y consultas no se exponen a los usuarios de esa empresa. Las empresas sin el módulo mantienen sus flujos actuales de avisos, landings, informes operativos y notificaciones.
 
-## Navegación en una empresa con el módulo habilitado
+## Integración visual con el CRM
 
-- **Avisos** conserva la recepción y gestión actuales.
-- **Cobros** reúne trabajos pendientes, parciales y cobrados; cada trabajo muestra cliente, importe, pagos, saldo y fechas. Permite anotar varios pagos.
-- **Facturación** reúne borradores, facturas emitidas, rectificativas y documentos vinculados, con búsqueda y filtros.
-- **Gastos** muestra los gastos del trabajo; materiales y otros (gasolina, comida, etc.) se pueden anotar desde el aviso o desde su ficha.
-- **Contactos** guarda datos fiscales/comerciales y el historial de avisos y documentos del cliente.
-- **Presupuestos y albaranes** se crean desde el aviso y permanecen vinculados a él. Un presupuesto aceptado puede convertirse en albarán o factura reutilizando líneas y datos.
-- **Informes** muestra importes de trabajo, gastos, beneficio estimado, cobrado y pendiente por fecha o rango.
+La facturación será un espacio de trabajo propio dentro del CRM, no una colección de formularios añadidos a Avisos. En la navegación normal de la empresa habrá un acceso **Facturación**; al abrirlo se mostrará una pantalla completa con cabecera y navegación interna, respetando la empresa activa y el usuario ya autenticado. No habrá otro login ni un selector de negocios propio: el selector de empresa sigue siendo responsabilidad del panel de Superadministración.
 
-En móvil, los apartados se incorporan al menú existente respetando su navegación. No se sustituye ni se renombra el formulario público de las landings.
+La referencia visual y funcional son las capturas compartidas: listados compactos, búsqueda, filtros, estados visibles, acciones de crear y fichas relacionadas. Se tomará como inspiración de uso, con diseño y textos propios del CRM, sin copiar marca, datos ni contenido privado del programa mostrado.
+
+Dentro de ese espacio:
+
+- **Resumen:** total de trabajos, facturado, cobrado, pendiente, gastos y beneficio estimado; accesos rápidos para crear factura, contacto, gasto o presupuesto.
+- **Facturas:** pestañas para emitidas, borradores y recurrentes; búsqueda por cliente/NIF/número/importe/concepto; vencimiento, estado de pago y estado de envío fiscal visibles. Rectificativas enlazadas a su factura original.
+- **Presupuestos:** presupuestos, facturas proforma y albaranes; acciones para convertir documentos sin volver a escribir cliente y conceptos.
+- **Gastos:** gastos propios de la empresa y gastos asociados a un aviso, con categoría, proveedor, importe, fecha y adjunto opcional. Separados de los gastos de materiales imputados a un trabajo.
+- **Contactos:** clientes y proveedores, datos fiscales/comerciales, correos, dirección, condiciones y resumen de documentos/deuda. Se reutiliza la ficha del cliente del aviso, sin duplicar personas.
+- **Productos y servicios:** catálogo opcional para agilizar conceptos y precios; cada factura puede añadir o editar conceptos según el trabajo realizado.
+- **Cobros y pagos:** pagos del cliente por factura/trabajo, parciales o completos, método, fecha, referencia y saldo pendiente. Bancos y remesas se dejan como ampliación posterior, porque no hacen falta para el primer flujo de reparación.
+- **Configuración de documentos:** datos fiscales del emisor, plantilla/logo, idioma, series, vencimientos y correo remitente, por empresa. Certificado fiscal solo en backend.
+
+Al iniciar desde un aviso, el CRM abrirá el espacio Facturación con ese aviso y cliente ya seleccionados. Desde Facturación también se podrá trabajar sin aviso enlazado, para documentos generales. Cada fila llevará de vuelta al aviso cuando exista relación.
+
+En móvil, el espacio usará navegación adaptable y conservará las mismas acciones principales. El formulario público y los endpoints de las landings no se mueven ni se modifican por integrar esta pantalla.
 
 ## Recorrido principal
 
