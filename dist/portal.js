@@ -78,6 +78,7 @@ applyCompanyTheme=function(color){originalCompanyTheme(ADMIN_PORTAL?'#5267e8':co
 const originalCompanyPicker=renderCompanyPicker;
 renderCompanyPicker=function(){
  if(!ADMIN_PORTAL){originalCompanyPicker();return;}
+ const search=document.querySelector('.top-actions .search');if(search)search.hidden=!adminOperatingCompany;
  const el=document.querySelector('.company-select');if(el){el.hidden=false;el.innerHTML='<span class="company-badge">'+(adminOperatingCompany&&currentCompany?esc((currentCompany.name||'').slice(0,2).toUpperCase()):'A')+'</span><span>'+esc(adminOperatingCompany&&currentCompany?'Empresa: '+currentCompany.name:currentCompany?'Configurando: '+currentCompany.name:'Administración global')+'</span>';el.onclick=()=>adminOperatingCompany?returnToSuperadminPanel():showPage('empresas');}
  renderCompanyBrand();
  const back=document.querySelector('#adminBackToPanel');if(adminOperatingCompany){if(!back){const b=document.createElement('button');b.id='adminBackToPanel';b.type='button';b.className='outline-btn';b.textContent='Panel superadministrador';b.onclick=returnToSuperadminPanel;document.querySelector('.top-actions')?.prepend(b);}}else back?.remove();
