@@ -707,13 +707,19 @@ async function deleteNotice(id){
   if(!isSuperAdmin){toast('Solo el superadministrador puede eliminar avisos.','Acceso restringido');return false;}
   const notice=notices.find(item=>item.id===id);if(!notice)return false;
   const name=notice.customer_name||'este aviso';
-  if(!await confirmDialog('Se eliminará definitivamente el aviso de '+name+'. Esta acción no se puede deshacer.'))return false;
+  if(!await confirmDialog('Se eliminará definitivamente el aviso de '+name+', junto con su facturación, gastos y pagos asociados. Esta acción no se puede deshacer.'))return false;
   const {data,error}=await db.from('notices').delete().eq('id',id).select('id');
   if(error){toast(errorText(error),'No se pudo eliminar');return false;}
   if(!data?.length){toast('No se encontró el aviso o tu sesión no tiene permiso.','No se pudo eliminar');return false;}
   notices=notices.filter(item=>item.id!==id);
+  let paymentsRemoved=true;
+  try{
+    const paymentResult=await db.from('notice_payments').delete().eq('notice_id',id).select('id');
+    if(paymentResult.error){paymentsRemoved=false;console.error('No se pudieron borrar los pagos asociados al aviso',paymentResult.error);}
+  }catch(error){paymentsRemoved=false;console.error('No se pudieron borrar los pagos asociados al aviso',error);}
   renderRows();renderComplaints();renderClientHistory();
-  toast('El aviso se ha eliminado definitivamente.','Aviso eliminado');
+  if(typeof renderFinance==='function')renderFinance();
+  toast(paymentsRemoved?'El aviso y su facturación asociada se han eliminado definitivamente.':'El aviso se eliminó; sus pagos huérfanos no cuentan en los totales.','Aviso eliminado');
   return true;
 }
 async function editNotice(id){
@@ -860,7 +866,7 @@ function openPendingNotices(status='Nuevo') {
       const saved=await changeStatus(id,effectiveStatus,reason);
       if(saved){
         if(scheduleButton){close();toast('Aviso sacado. Puedes completar la cita.','Aviso actualizado');await openAppointmentDialog(null,{notice_id:id});}
-        else {toast(status==='Sale'?'Aviso marcado como sacado.':status==='No sale'?'Aviso marcado como no sacado.':status==='Pendiente de localizar'?'Aviso guardado como pendiente de localizar.':'Aviso guardado como nuevo.','Gestión actualizada');if(backdrop.isConnected)renderPendingNoticeList(backdrop);}
+        else {toast(status==='Sale'?'Aviso marcado como sacado.':status==='No sale'?'Aviso marcado como no sacado.':status==='Pendiente de localizar'?'Aviso guardado como pendiente de localizar.':'Aviso guardado como nuevo.','Gestión actualizada');if(backdrop.isConnected){if((backdrop.dataset.pendingStatus||'Nuevo')==='Nuevo'&&effectiveStatus==='Sale'&&!pendingNoticeRows('Nuevo').length)close();else renderPendingNoticeList(backdrop);}}
       } else if(backdrop.isConnected)renderPendingNoticeDetail(backdrop,id);
       return;
     }
@@ -870,7 +876,7 @@ function openPendingNotices(status='Nuevo') {
       if(status==='No sale'){close();reason=await requestNoSaleReason(notices.find(item=>item.id===id)?.management_reason||'');if(reason===null)return;}
       host.querySelectorAll('button').forEach(button=>button.disabled=true);action.textContent='Guardando…';
       const saved=await changeStatus(id,status,reason);
-      if(saved){toast(status==='Sale'?'Aviso marcado como sacado.':'Aviso marcado como no sacado.','Gestión actualizada');if(backdrop.isConnected)renderPendingNoticeList(backdrop);}
+      if(saved){toast(status==='Sale'?'Aviso marcado como sacado.':'Aviso marcado como no sacado.','Gestión actualizada');if(backdrop.isConnected){if((backdrop.dataset.pendingStatus||'Nuevo')==='Nuevo'&&status==='Sale'&&!pendingNoticeRows('Nuevo').length)close();else renderPendingNoticeList(backdrop);}}
       else if(backdrop.isConnected)renderPendingNoticeDetail(backdrop,id);
     }
   });
