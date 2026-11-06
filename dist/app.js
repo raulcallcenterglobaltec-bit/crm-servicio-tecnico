@@ -56,7 +56,7 @@ function formDialog({title,description='',fields=[],confirmText='Guardar',classN
     }
     const finish=value=>{backdrop.remove();resolve(value);};
     backdrop.addEventListener('click',e=>{const target=e.target;if(target===backdrop||(target instanceof Element&&target.closest('[data-dialog-cancel]'))){e.preventDefault();e.stopPropagation();finish(null);}});
-    $('form',backdrop).addEventListener('submit',e=>{e.preventDefault();const result={};for(const f of fields){if(f.type==='action')continue;const el=$('[name="'+CSS.escape(f.key)+'"]',backdrop);if(f.type==='search-select'&&!el.value){const search=$('[data-search-select-input="'+CSS.escape(f.key)+'"]',backdrop);search.setCustomValidity('Selecciona un cliente de la lista.');search.reportValidity();search.focus();return;}result[f.key]=f.type==='checkbox'?el.checked:f.type==='number'?Number(el.value):f.type==='file'?(el.files?.[0]||null):el.value;}if(className==='agenda-form-dialog'){
+    $('form',backdrop).addEventListener('submit',e=>{e.preventDefault();const result={};for(const f of fields){if(f.type==='action')continue;const el=$('[name="'+CSS.escape(f.key)+'"]',backdrop);if(f.type==='search-select'&&!el.value){const search=$('[data-search-select-input="'+CSS.escape(f.key)+'"]',backdrop);search.setCustomValidity('Selecciona un cliente de la lista.');search.reportValidity();search.focus();return;}result[f.key]=f.type==='checkbox'?el.checked:f.type==='number'?(el.value===''?null:Number(el.value)):f.type==='file'?(el.files?.[0]||null):el.value;}if(className==='agenda-form-dialog'){
         const clientEdits={};
         backdrop.querySelectorAll('[data-agenda-client-edit]').forEach(input=>clientEdits[input.dataset.agendaClientEdit]=input.value.trim());
         if(Object.keys(clientEdits).length)result.clientEdits=clientEdits;
@@ -248,6 +248,7 @@ function applyAccessPermissions() {
   $$('[data-page]').forEach(button=>{if(['empresas','usuarios','personalizacion','configuracion','integraciones'].includes(button.dataset.page))button.hidden=!isSuperAdmin;});
   const createButton=$('#newNotice');if(createButton)createButton.hidden=!isSuperAdmin&&current?.role==='consulta';
   const createComplaint=$('#newComplaint');if(createComplaint)createComplaint.hidden=!isSuperAdmin&&current?.role==='consulta';
+  if(typeof applyCompanyModules==='function')applyCompanyModules();
 }
 function mixColor(hex,target,weight) {
   const from=hex.match(/[\da-f]{2}/ig)||['52','67','e8'],to=target.match(/[\da-f]{2}/ig)||['ff','ff','ff'];
@@ -313,8 +314,11 @@ async function loadCompanyData() {
     [landings,notices,tariffs,fields,members]=results.slice(0,5).map(r=>Array.isArray(r.data)?r.data:[]);
     appointments=Array.isArray(results[5].data)?results[5].data:[];
     calendarConnection=results[6].data||null;
+    membershipLoadStage='cargando cobros y gastos';
+    await loadFinanceData(c);
     if(googleCalendarAccessCompanyId!==c){googleCalendarAccessToken=null;googleCalendarAccessExpiresAt=0;googleCalendarAccessCompanyId=null;}
     applyAccessPermissions();
+    applyCompanyModules();
     membershipLoadStage='preparando campos de avisos';
     if(!fields.length){const seeds=['phone','landing'].flatMap(channel=>defaultFields.map(f=>({...f,channel,options:f.options||[],company_id:c})));const {data:createdFields,error}=await db.from('notice_fields').insert(seeds).select();if(error)throw error;fields=createdFields||[];}
     membershipLoadStage='conectando avisos en tiempo real';
@@ -324,6 +328,7 @@ async function loadCompanyData() {
     membershipLoadStage='dibujando opciones de landing';renderLandingOptions();
     membershipLoadStage='dibujando tabla de avisos';renderRows();
     membershipLoadStage='dibujando informes';renderReport();
+    membershipLoadStage='dibujando cobros';renderFinance();
     membershipLoadStage='dibujando reclamaciones';renderComplaints();
     membershipLoadStage='dibujando historial';renderClientHistory();
     membershipLoadStage='dibujando agenda';renderAgenda();
@@ -341,6 +346,7 @@ async function loadCompanyData() {
     const safeRender=(stage,fn)=>{membershipLoadStage=stage;try{fn();}catch(renderError){console.error('Error al limpiar vista tras fallo',stage,renderError);}};
     safeRender('limpiando tabla de avisos',()=>{renderLandingOptions();renderRows();});
     safeRender('limpiando informes',renderReport);
+    safeRender('limpiando cobros',renderFinance);
     safeRender('limpiando reclamaciones',renderComplaints);
     safeRender('limpiando historial',renderClientHistory);
     safeRender('limpiando agenda',renderAgenda);
@@ -620,9 +626,10 @@ async function changeStatus(id,status,managementReason=null) {
   const wasSale=n.status==='Sale';
   const tariff=tariffForNotice(n);
   const patch={status,managed_at:status==='Nuevo'?null:new Date().toISOString(),unit_price:status==='Sale'?Number(tariff?.price||0):0,management_reason:status==='No sale'?managementReason:null};
+  if(status==='Sale'&&currentCompany?.show_work_finance)patch.work_completed_at=financeToday();
   const {data,error}=await db.from('notices').update(patch).eq('id',id).select().single();
   if(error){toast(errorText(error),'No se pudo guardar');renderRows();return false;}
-  Object.assign(n,data);renderRows();renderComplaints();renderClientHistory();
+  Object.assign(n,data);renderRows();renderComplaints();renderClientHistory();renderFinance();
   if(!wasSale&&status==='Sale'&&n.created_by&&!n.landing_id&&n.notice_type==='aviso')await sendNoticeToConfiguredIntegrations(n);
   return true;
 }
@@ -1141,12 +1148,13 @@ async function createNotice(event) {
   if(type!=='aviso')custom_fields[addressConfig?.field_key||'address']=v('fAddress')||null;
   const category=categoryFor(device);
   const row={company_id:currentCompany.id,landing_id:null,notice_type:type,status:v('fStatus')||'Nuevo',customer_name:v('fName'),phone:v('fPhone'),email:$('#fEmail')?.value?.trim()||null,locality:v('fLocality')||null,postal_code:v('fPostal')||null,device:device||null,category:isPhoneNotice?category:null,brand:isPhoneNotice?(v('fBrand')||null):null,issue:v('fIssue')||null,custom_fields,unit_price:0,management_reason:managementReason,created_by:user.id};
+  if(row.status==='Sale'&&currentCompany?.show_work_finance)row.work_completed_at=financeToday();
   if(!isPhoneNotice&&relatedNoticeMatch)row.related_notice_id=relatedNoticeMatch.id;
   if(row.status==='Sale'&&isPhoneNotice)row.unit_price=Number(tariffForNotice(row)?.price||0);
   const {data,error}=await db.from('notices').insert(row).select().single();
   if(error){submitButtons.forEach(button=>button.disabled=false);toast(errorText(error),'No se pudo guardar el aviso');return;}
   submitButtons.forEach(button=>button.disabled=false);
-  notices.unshift(data);relatedNoticeMatch=null;$('#modal').classList.remove('open');event.target.reset();renderRows();renderComplaints();renderClientHistory();
+  notices.unshift(data);relatedNoticeMatch=null;$('#modal').classList.remove('open');event.target.reset();renderRows();renderComplaints();renderClientHistory();renderFinance();
   if(type!=='aviso'&&data.status==='Sale')await sendNoticeToConfiguredIntegrations(data);
   else if(type!=='aviso')toast('Se ha guardado sin enviar: cliente equivocado o llamada ajena a la empresa.','Registro guardado');
   else if(data.status==='Sale')await sendNoticeToConfiguredIntegrations(data);
@@ -1223,7 +1231,7 @@ async function addCompany() {
 }
 async function openCompanyDetails(companyId) {
   const company=companies.find(c=>c.id===companyId);if(!company)return;
-  const answer=await formDialog({title:'Datos de la empresa',description:'Consulta o actualiza los datos generales y el logo.',fields:[
+  const answer=await formDialog({title:'Datos de la empresa',description:'Consulta los datos generales y elige qué bloques de informes y cobros usa esta empresa.',fields:[
     {key:'name',label:'Nombre de la empresa',value:company.name,required:true},
     {key:'administrator_name',label:'Administrador o representante',value:company.administrator_name||''},
     {key:'tax_id',label:'CIF / NIF',value:company.tax_id||''},
@@ -1233,6 +1241,8 @@ async function openCompanyDetails(companyId) {
     {key:'province',label:'Provincia',value:company.province||''},
     {key:'contact_email',label:'Correo electrónico',type:'email',value:company.contact_email||''},
     {key:'contact_phone',label:'Teléfono',type:'tel',value:company.contact_phone||''},
+    {key:'show_tariff_reports',label:'Mostrar informes por tarifas fijas',type:'checkbox',value:company.show_tariff_reports!==false},
+    {key:'show_work_finance',label:'Activar bloque de facturación y cobros por trabajo',type:'checkbox',value:company.show_work_finance===true},
     {key:'logo_file',label:'Logo de la empresa (PNG, JPG, WEBP o SVG; máximo 2 MB)',type:'file',accept:'image/png,image/jpeg,image/webp,image/svg+xml'}
   ]});
   if(!answer)return;
@@ -1247,7 +1257,9 @@ async function openCompanyDetails(companyId) {
     city:answer.city.trim()||null,
     province:answer.province.trim()||null,
     contact_email:answer.contact_email.trim()||null,
-    contact_phone:answer.contact_phone.trim()||null
+    contact_phone:answer.contact_phone.trim()||null,
+    show_tariff_reports:!!answer.show_tariff_reports,
+    show_work_finance:!!answer.show_work_finance
   };
   if(file){
     const ext=({jpeg:'jpg','svg+xml':'svg'}[file.type.split('/')[1]]||file.type.split('/')[1]);
@@ -1261,7 +1273,8 @@ async function openCompanyDetails(companyId) {
   Object.assign(company,data);
   if(currentCompany?.id===company.id){
     Object.assign(currentCompany,data);
-    renderCompanyPicker();renderSettings();
+    renderCompanyPicker();renderSettings();applyCompanyModules();
+    await loadCompanyData();
   }
   renderCompanyPage();
   toast('Datos de la empresa guardados.');
@@ -1815,13 +1828,14 @@ function collapseSettingsPanels() {
 }
 function showPage(name) {
   if(name!=='configuracion')collapseSettingsPanels();
-  if(!isSuperAdmin&&!['avisos-landing','avisos-phone','informes','reclamaciones','anulaciones','historial','agenda'].includes(name))return;
+  if(name==='cobros'&&!companyHasWorkFinance())return;
+  if(!isSuperAdmin&&!['avisos-landing','avisos-phone','informes','reclamaciones','anulaciones','historial','agenda','cobros'].includes(name))return;
   closeMobileMore(false);
   const pageName=(name==='avisos-landing'||name==='avisos-phone')?'avisos':name;
   $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+pageName));
   $$('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
   document.querySelectorAll('#mobileNav [data-page],#mobileMorePanel [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
-  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',reclamaciones:'Reclamaciones',anulaciones:'Anulaciones',historial:'Historial de clientes',agenda:'Agenda - Citas',empresas:'Empresas',usuarios:'Usuarios y permisos',personalizacion:'Personalización',configuracion:'Configuración',integraciones:'Integraciones'};
+  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',cobros:'Cobros',reclamaciones:'Reclamaciones',anulaciones:'Anulaciones',historial:'Historial de clientes',agenda:'Agenda - Citas',empresas:'Empresas',usuarios:'Usuarios y permisos',personalizacion:'Personalización',configuracion:'Configuración',integraciones:'Integraciones'};
   $('#breadcrumb').textContent='Panel / '+labels[name];
   if(pageName==='avisos'){
     noticeSource=name==='avisos-phone'?'phone':'landing';
@@ -1836,6 +1850,7 @@ function showPage(name) {
   if(pageName==='reclamaciones'||pageName==='anulaciones')renderComplaints();
   if(pageName==='historial')renderClientHistory();
   if(pageName==='agenda')renderAgenda();
+  if(pageName==='cobros')renderFinance();
   $('#sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'});
 }
 let mobileMoreScrollY=0;
@@ -1864,6 +1879,7 @@ function closeMobileMore(restoreScroll=true) {
 }
 function wireUI() {
   installPendingUi();
+  wireFinance();
   document.querySelectorAll('#page-configuracion [data-settings-collapse]').forEach(button=>button.addEventListener('click',()=>{const body=document.getElementById(button.getAttribute('aria-controls'));if(!body)return;body.hidden=!body.hidden;button.textContent=body.hidden?'Mostrar':'Ocultar';button.setAttribute('aria-expanded',String(!body.hidden));}));
   $('#sidebar').addEventListener('click',event=>{const button=event.target.closest('button[data-page]');if(button){event.preventDefault();showPage(button.dataset.page);}});
   setupDate('main');setupDate('report');
