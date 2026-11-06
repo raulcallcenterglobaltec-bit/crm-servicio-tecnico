@@ -1946,9 +1946,23 @@ function wireUI() {
   $('#cancelModal').addEventListener('click',()=>$('#modal').classList.remove('open'));
   $('#modal').addEventListener('click',e=>{if(e.target.id==='modal')e.currentTarget.classList.remove('open');});
   $('#fPhone').addEventListener('input',()=>{duplicatePhoneBypass=null;});
-  $('#noticeForm').noValidate=true;
-  ['saveNotice','saveAndSchedule'].forEach(id=>$('#'+id).addEventListener('click',event=>{event.preventDefault();$('#noticeForm').requestSubmit(event.currentTarget);}));
-  $('#noticeForm').addEventListener('submit',createNotice);
+  const noticeForm=$('#noticeForm');
+  noticeForm.noValidate=true;
+  const submitNotice=(event,button)=>{
+    event.preventDefault();
+    const form=$('#noticeForm');
+    const submitEvent=new SubmitEvent('submit',{bubbles:true,cancelable:true,submitter:button||event.submitter||null});
+    form.dispatchEvent(submitEvent);
+  };
+  ['saveNotice','saveAndSchedule'].forEach(id=>$('#'+id).addEventListener('click',event=>submitNotice(event,event.currentTarget)));
+  noticeForm.addEventListener('submit',event=>{
+    createNotice(event).catch(error=>{
+      console.error('No se pudo completar el guardado del aviso',error);
+      noticeForm.querySelectorAll('button[type="submit"]').forEach(button=>button.disabled=false);
+      updateRecordSubmitLabel();
+      toast(errorText(error),'No se pudo guardar el aviso');
+    });
+  });
   $('#mobileNav').addEventListener('click',event=>{const button=event.target.closest('button[data-page]');if(button)showPage(button.dataset.page);});
   $('#mobileMoreLinks').addEventListener('click',event=>{const button=event.target.closest('button[data-page]');if(button)showPage(button.dataset.page);});
   $('#mobileMoreToggle').addEventListener('click',()=>$('#mobileMorePanel').hidden?openMobileMore():closeMobileMore(true));
