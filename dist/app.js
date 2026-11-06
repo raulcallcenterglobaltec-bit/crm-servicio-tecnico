@@ -785,7 +785,7 @@ function showDetails(id) {
     (custom?'<section class="record-detail-section"><h3>Otros datos</h3><div class="record-detail-grid">'+custom+'</div></section>':'')+financeSection+
     '<div class="modal-actions"><button class="primary-btn" type="button">Cerrar</button></div></div>';
   document.body.append(backdrop);
-  $('.close,.modal-actions .primary-btn',backdrop).forEach(button=>button.onclick=()=>backdrop.remove());
+  $$('.close,.modal-actions .primary-btn',backdrop).forEach(button=>button.onclick=()=>backdrop.remove());
   $('[data-open-finance-details]',backdrop)?.addEventListener('click',()=>{backdrop.remove();openFinanceDetails(n.id);});
   $('[data-open-finance-payment]',backdrop)?.addEventListener('click',()=>{backdrop.remove();openFinancePayment(n.id);});
   backdrop.onclick=event=>{if(event.target===backdrop)backdrop.remove();};
