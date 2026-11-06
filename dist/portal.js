@@ -74,3 +74,9 @@ renderCompanyPicker=function(){
  const el=document.querySelector('.company-select');if(el){el.hidden=false;el.innerHTML='<span class="company-badge">A</span><span>'+esc(currentCompany?'Configurando: '+currentCompany.name:'Administración global')+'</span>';el.onclick=()=>showPage('empresas');}
  renderCompanyBrand();
 };
+document.addEventListener('DOMContentLoaded',()=>{
+ if(!ADMIN_PORTAL)return;
+ const title=document.querySelector('#authScreen h1');if(title)title.textContent='Acceso de superadministrador';
+ const text=document.querySelector('#authScreen p');if(text)text.textContent='Administración central de empresas, bloques y configuración.';
+ const signup=document.querySelector('#authSwitch');if(signup)signup.hidden=true;
+});
