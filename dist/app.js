@@ -1241,8 +1241,6 @@ async function openCompanyDetails(companyId) {
     {key:'province',label:'Provincia',value:company.province||''},
     {key:'contact_email',label:'Correo electrónico',type:'email',value:company.contact_email||''},
     {key:'contact_phone',label:'Teléfono',type:'tel',value:company.contact_phone||''},
-    {key:'show_tariff_reports',label:'Mostrar informes por tarifas fijas',type:'checkbox',value:company.show_tariff_reports!==false},
-    {key:'show_work_finance',label:'Activar bloque de facturación y cobros por trabajo',type:'checkbox',value:company.show_work_finance===true},
     {key:'logo_file',label:'Logo de la empresa (PNG, JPG, WEBP o SVG; máximo 2 MB)',type:'file',accept:'image/png,image/jpeg,image/webp,image/svg+xml'}
   ]});
   if(!answer)return;
@@ -1258,8 +1256,6 @@ async function openCompanyDetails(companyId) {
     province:answer.province.trim()||null,
     contact_email:answer.contact_email.trim()||null,
     contact_phone:answer.contact_phone.trim()||null,
-    show_tariff_reports:!!answer.show_tariff_reports,
-    show_work_finance:!!answer.show_work_finance
   };
   if(file){
     const ext=({jpeg:'jpg','svg+xml':'svg'}[file.type.split('/')[1]]||file.type.split('/')[1]);
@@ -1285,6 +1281,24 @@ function renderCompanyPage() {
   let grid=$('.simple-grid',section);if(!grid)return;
   grid.innerHTML=companies.map(c=>`<div class="placeholder-tile" style="display:flex;align-items:center;justify-content:space-between;gap:12px"><button type="button" data-company-card="${c.id}" style="flex:1;text-align:left;border:0;background:transparent;color:inherit;padding:0;cursor:pointer;display:flex;align-items:center;gap:12px"><span class="company-badge" style="width:52px;height:52px;flex:0 0 52px;display:grid;place-items:center;overflow:hidden">${c.logo_path?`<img src="${esc(c.logo_path)}" alt="Logo de ${esc(c.name)}" style="width:100%;height:100%;object-fit:contain;background:#fff;border-radius:inherit;padding:3px"/>`:esc(c.name.slice(0,2).toUpperCase())}</span><span style="display:grid;gap:5px;text-align:left"><strong>${esc(c.name)}</strong><small>${c.id===currentCompany?.id?'Empresa actual · Ver o editar datos':'Ver o editar datos'}</small></span></button><button type="button" class="mini-delete" data-delete-company="${c.id}" aria-label="Eliminar empresa ${esc(c.name)}" title="Eliminar empresa">×</button></div>`).join('')||'<div class="empty">Crea tu primera empresa.</div>';
   $$('[data-company-card]',grid).forEach(b=>b.onclick=()=>openCompanyDetails(b.dataset.companyCard));
+  grid.querySelectorAll('.placeholder-tile').forEach((card,index)=>{
+    const company=companies[index];if(!company)return;
+    card.style.display='grid';card.style.gap='12px';
+    const controls=document.createElement('div');controls.className='company-admin-controls';
+    controls.style.cssText='display:grid;gap:8px;padding-top:11px;border-top:1px solid var(--line)';
+    controls.innerHTML='<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#526077"><input type="checkbox" data-company-module="show_tariff_reports" '+(company.show_tariff_reports!==false?'checked':'')+'/> Informes con tarifas fijas</label><label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#526077"><input type="checkbox" data-company-module="show_work_finance" '+(company.show_work_finance===true?'checked':'')+'/> Facturación y cobros por trabajo</label><div style="display:flex;gap:7px;flex-wrap:wrap"><button class="outline-btn" type="button" data-company-open-page="usuarios">Usuarios y permisos</button><button class="outline-btn" type="button" data-company-open-page="personalizacion">Personalización</button><button class="outline-btn" type="button" data-company-open-page="configuracion">Configuración</button><button class="outline-btn" type="button" data-company-open-page="integraciones">Integraciones</button></div>';
+    card.append(controls);
+    controls.querySelectorAll('[data-company-module]').forEach(input=>input.addEventListener('change',async()=>{
+      const key=input.dataset.companyModule,previous=!!company[key];input.disabled=true;
+      const result=await db.from('companies').update({[key]:input.checked}).eq('id',company.id).select().single();
+      if(result.error){input.checked=previous;toast(errorText(result.error),'No se pudo guardar el bloque');input.disabled=false;return;}
+      Object.assign(company,result.data);
+      if(currentCompany?.id===company.id){Object.assign(currentCompany,result.data);applyCompanyModules();}
+      input.disabled=false;toast(input.checked?'Bloque activado.':'Bloque desactivado.');
+    }));
+    controls.querySelectorAll('[data-company-open-page]').forEach(button=>button.onclick=async()=>{if(currentCompany?.id!==company.id){currentCompany=company;await loadCompanyData();}showPage(button.dataset.companyOpenPage);});
+  });
+
   $$('[data-delete-company]',grid).forEach(b=>b.onclick=async()=>{
     const company=companies.find(c=>c.id===b.dataset.deleteCompany);if(!company)return;
     const confirmed=await confirmDialog(`¿Eliminar la empresa «${company.name}»? Se borrarán definitivamente sus avisos, landings, campos, tarifas, usuarios e integraciones. Esta acción no se puede deshacer.`);
@@ -1828,14 +1842,18 @@ function collapseSettingsPanels() {
 }
 function showPage(name) {
   if(name!=='configuracion')collapseSettingsPanels();
-  if(name==='cobros'&&!companyHasWorkFinance())return;
+  if(name==='cobros'&&!companyHasWorkFinance()){
+    toast('Activa «Facturación y cobros por trabajo» desde Superadministración.','Bloque desactivado');
+    if(isSuperAdmin)showPage('empresas');
+    return;
+  }
   if(!isSuperAdmin&&!['avisos-landing','avisos-phone','informes','reclamaciones','anulaciones','historial','agenda','cobros'].includes(name))return;
   closeMobileMore(false);
   const pageName=(name==='avisos-landing'||name==='avisos-phone')?'avisos':name;
   $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+pageName));
   $$('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
   document.querySelectorAll('#mobileNav [data-page],#mobileMorePanel [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
-  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',cobros:'Cobros',reclamaciones:'Reclamaciones',anulaciones:'Anulaciones',historial:'Historial de clientes',agenda:'Agenda - Citas',empresas:'Empresas',usuarios:'Usuarios y permisos',personalizacion:'Personalización',configuracion:'Configuración',integraciones:'Integraciones'};
+  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',cobros:'Cobros',empresas:'Superadministración',reclamaciones:'Reclamaciones',anulaciones:'Anulaciones',historial:'Historial de clientes',agenda:'Agenda - Citas',usuarios:'Usuarios y permisos',personalizacion:'Personalización',configuracion:'Configuración',integraciones:'Integraciones'};
   $('#breadcrumb').textContent='Panel / '+labels[name];
   if(pageName==='avisos'){
     noticeSource=name==='avisos-phone'?'phone':'landing';
