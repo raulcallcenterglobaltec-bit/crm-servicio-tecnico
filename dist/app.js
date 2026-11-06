@@ -255,6 +255,10 @@ function showOnboarding() {
   $('#authForm').hidden=true;$('#authSwitch').hidden=true;$('#forgotPassword').hidden=true;
   $('#authError').textContent='Pide al superadministrador que te invite a la empresa correspondiente.';
 }
+function applyCompanyModules(){
+  const fixed=currentCompany?.show_tariff_reports!==false;
+  document.querySelectorAll('[data-fixed-tariff-only]').forEach(el=>el.style.display=fixed?'':'none');
+}
 function applyAccessPermissions() {
   members=Array.isArray(members)?members:[];companies=Array.isArray(companies)?companies:[];
   const adminNav=$$('[data-admin-only]');adminNav.forEach(el=>el.hidden=!isSuperAdmin);
@@ -330,8 +334,6 @@ async function loadCompanyData() {
     [landings,notices,tariffs,fields,members]=results.slice(0,5).map(r=>Array.isArray(r.data)?r.data:[]);
     appointments=Array.isArray(results[5].data)?results[5].data:[];
     calendarConnection=results[6].data||null;
-    membershipLoadStage='cargando cobros y gastos';
-    await loadFinanceData(c);
     if(googleCalendarAccessCompanyId!==c){googleCalendarAccessToken=null;googleCalendarAccessExpiresAt=0;googleCalendarAccessCompanyId=null;}
     applyAccessPermissions();
     applyCompanyModules();
@@ -344,7 +346,6 @@ async function loadCompanyData() {
     membershipLoadStage='dibujando opciones de landing';renderLandingOptions();
     membershipLoadStage='dibujando tabla de avisos';renderRows();
     membershipLoadStage='dibujando informes';renderReport();
-    membershipLoadStage='dibujando cobros';renderFinance();
     membershipLoadStage='dibujando reclamaciones';renderComplaints();
     membershipLoadStage='dibujando historial';renderClientHistory();
     membershipLoadStage='dibujando agenda';renderAgenda();
@@ -362,7 +363,6 @@ async function loadCompanyData() {
     const safeRender=(stage,fn)=>{membershipLoadStage=stage;try{fn();}catch(renderError){console.error('Error al limpiar vista tras fallo',stage,renderError);}};
     safeRender('limpiando tabla de avisos',()=>{renderLandingOptions();renderRows();});
     safeRender('limpiando informes',renderReport);
-    safeRender('limpiando cobros',renderFinance);
     safeRender('limpiando reclamaciones',renderComplaints);
     safeRender('limpiando historial',renderClientHistory);
     safeRender('limpiando agenda',renderAgenda);
@@ -509,8 +509,7 @@ function renderRows() {
       return `<td>${esc(v||'—')}</td>`;
     }).join('');
     const sourceLabel=n.created_by?'Teléfono':landingName(n.landing_id);
-    const financeAction=currentCompany?.show_work_finance===true&&n.notice_type==='aviso'&&n.status==='Sale'&&canManage?`<button class="row-action finance-quick-action" data-finance-notice="${n.id}" aria-label="Añadir importe, gastos y cobros" title="Añadir importe, gastos y cobros">€</button>`:'';
-    return `<tr>${cells}<td><span class="source">${esc(sourceLabel)}</span></td><td>${esc(formatDate(n.received_at))}</td><td><select class="status ${statusClass(n.status)}" data-status-id="${n.id}" aria-label="Cambiar estado" ${canManage?'':'disabled'}>${['Nuevo','Pendiente de localizar','Sale','No sale'].map(s=>`<option value="${esc(s)}" ${s===n.status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select></td><td>${n.status==='Sale'?money(getUnitPrice(n)):'—'}</td><td><div class="notice-row-actions"><button class="row-action" data-open-id="${n.id}" aria-label="Ver aviso" title="Ver aviso">···</button>${financeAction}${canManageCurrentNotices()?`<button class="row-action" data-edit-id="${n.id}" aria-label="Editar aviso" title="Editar aviso">✎</button>`:'' }${isSuperAdmin?`<button class="row-action notice-delete" data-delete-id="${n.id}" aria-label="Eliminar aviso" title="Eliminar aviso">×</button>`:''}</div></td></tr>`;
+    return `<tr>${cells}<td><span class="source">${esc(sourceLabel)}</span></td><td>${esc(formatDate(n.received_at))}</td><td><select class="status ${statusClass(n.status)}" data-status-id="${n.id}" aria-label="Cambiar estado" ${canManage?'':'disabled'}>${['Nuevo','Pendiente de localizar','Sale','No sale'].map(s=>`<option value="${esc(s)}" ${s===n.status?'selected':''}>${esc(statusLabel(s))}</option>`).join('')}</select></td><td>${n.status==='Sale'?money(getUnitPrice(n)):'—'}</td><td><div class="notice-row-actions"><button class="row-action" data-open-id="${n.id}" aria-label="Ver aviso" title="Ver aviso">···</button>${canManageCurrentNotices()?`<button class="row-action" data-edit-id="${n.id}" aria-label="Editar aviso" title="Editar aviso">✎</button>`:'' }${isSuperAdmin?`<button class="row-action notice-delete" data-delete-id="${n.id}" aria-label="Eliminar aviso" title="Eliminar aviso">×</button>`:''}</div></td></tr>`;
   }).join('');
   $('#emptyState').hidden=rows.length>0;
   const sourceTotal=notices.filter(n=>n.notice_type==='aviso'&&(noticeSource==='phone'?!!n.created_by:!!n.landing_id)).length;
@@ -529,7 +528,6 @@ function renderRows() {
   updateLandingBadge();
   $$('[data-status-id]',body).forEach(sel=>sel.addEventListener('change',e=>handleNoticeStatusChange(e.target.dataset.statusId,e.target.value,e.target)));
   $$('[data-open-id]',body).forEach(b=>b.addEventListener('click',()=>showDetails(b.dataset.openId)));
-  $$('[data-finance-notice]',body).forEach(b=>b.addEventListener('click',()=>openFinanceDetails(b.dataset.financeNotice)));
   $$('[data-edit-id]',body).forEach(b=>b.addEventListener('click',()=>editNotice(b.dataset.editId)));
   $$('[data-delete-id]',body).forEach(b=>b.addEventListener('click',()=>deleteNotice(b.dataset.deleteId)));
   renderReport();
@@ -682,10 +680,9 @@ async function changeStatus(id,status,managementReason=null) {
   const wasSale=n.status==='Sale';
   const tariff=tariffForNotice(n);
   const patch={status,managed_at:status==='Nuevo'?null:new Date().toISOString(),unit_price:status==='Sale'?Number(tariff?.price||0):0,management_reason:status==='No sale'?managementReason:null};
-  if(status==='Sale'&&currentCompany?.show_work_finance)patch.work_completed_at=financeToday();
   const {data,error}=await db.from('notices').update(patch).eq('id',id).select().single();
   if(error){toast(errorText(error),'No se pudo guardar');renderRows();return false;}
-  Object.assign(n,data);renderRows();renderComplaints();renderClientHistory();renderFinance();
+  Object.assign(n,data);renderRows();renderComplaints();renderClientHistory();
   if(!wasSale&&status==='Sale'&&n.created_by&&!n.landing_id&&n.notice_type==='aviso')await sendNoticeToConfiguredIntegrations(n);
   return true;
 }
@@ -714,19 +711,13 @@ async function deleteNotice(id){
   if(!isSuperAdmin){toast('Solo el superadministrador puede eliminar avisos.','Acceso restringido');return false;}
   const notice=notices.find(item=>item.id===id);if(!notice)return false;
   const name=notice.customer_name||'este aviso';
-  if(!await confirmDialog('Se eliminará definitivamente el aviso de '+name+', junto con su facturación, gastos y pagos asociados. Esta acción no se puede deshacer.'))return false;
+  if(!await confirmDialog('Se eliminará definitivamente el aviso de '+name+'. Esta acción no se puede deshacer.'))return false;
   const {data,error}=await db.from('notices').delete().eq('id',id).select('id');
   if(error){toast(errorText(error),'No se pudo eliminar');return false;}
   if(!data?.length){toast('No se encontró el aviso o tu sesión no tiene permiso.','No se pudo eliminar');return false;}
   notices=notices.filter(item=>item.id!==id);
-  let paymentsRemoved=true;
-  try{
-    const paymentResult=await db.from('notice_payments').delete().eq('notice_id',id).select('id');
-    if(paymentResult.error){paymentsRemoved=false;console.error('No se pudieron borrar los pagos asociados al aviso',paymentResult.error);}
-  }catch(error){paymentsRemoved=false;console.error('No se pudieron borrar los pagos asociados al aviso',error);}
   renderRows();renderComplaints();renderClientHistory();
-  if(typeof renderFinance==='function')renderFinance();
-  toast(paymentsRemoved?'El aviso y su facturación asociada se han eliminado definitivamente.':'El aviso se eliminó; sus pagos huérfanos no cuentan en los totales.','Aviso eliminado');
+  toast('El aviso se ha eliminado definitivamente.','Aviso eliminado');
   return true;
 }
 async function editNotice(id){
@@ -781,12 +772,6 @@ function showDetails(id) {
   const statusTone=n.status==='Sale'?'success':n.status==='No sale'?'danger':n.status==='Pendiente de localizar'?'pending':'new';
   const item=(label,value)=>'<div class="record-detail-item"><span>'+esc(label)+'</span><strong>'+esc(value===null||value===undefined||value===''?'—':String(value))+'</strong></div>';
   const custom=Object.entries(n.custom_fields||{}).filter(([,value])=>value!==null&&value!==undefined&&value!=='').map(([key,value])=>item(fields.find(f=>f.field_key===key)?.label||key,value)).join('');
-  const financeEnabled=currentCompany?.show_work_finance===true&&n.notice_type==='aviso'&&n.status==='Sale';
-  let financeSection='';
-  if(financeEnabled){
-    const amount=n.work_amount===null||n.work_amount===undefined||n.work_amount===''?null:Number(n.work_amount),paid=financePaidTotal(n.id),balance=amount===null?null:Math.max(amount-paid,0);
-    financeSection='<section class="record-detail-section"><h3>Facturación y cobros</h3><p style="margin:0 0 10px;color:#718097;font-size:11px">Aquí puedes anotar el importe del trabajo, factura, gastos y pagos del cliente.</p><div class="record-detail-grid">'+item('Importe a cobrar',amount===null?'Pendiente de completar':money(amount))+item('Cobrado',money(paid))+item('Pendiente de cobro',balance===null?'—':money(balance))+item('Gastos',money(Number(n.material_cost||0)+Number(n.other_cost||0)))+'</div><div class="finance-job-actions" style="margin-top:10px"><button class="primary-btn" type="button" data-open-finance-details="'+esc(n.id)+'">'+(amount===null?'Añadir facturación y gastos':'Editar facturación y gastos')+'</button>'+(amount!==null&&balance>.005?'<button class="outline-btn" type="button" data-open-finance-payment="'+esc(n.id)+'">Registrar pago</button>':'')+'</div></section>';
-  }
   const backdrop=document.createElement('div');backdrop.className='modal-backdrop open record-detail-backdrop';
   backdrop.innerHTML='<div class="modal record-detail-modal" role="dialog" aria-modal="true" aria-labelledby="recordDetailTitle">'+
     '<div class="modal-head"><div><div class="record-detail-eyebrow">'+esc(typeLabel)+'</div><h2 id="recordDetailTitle">Detalle del registro</h2></div><button class="close" type="button" aria-label="Cerrar">×</button></div>'+
@@ -795,18 +780,16 @@ function showDetails(id) {
     '<section class="record-detail-section"><h3>Datos del aviso</h3><div class="record-detail-grid">'+item('Aparato',n.device)+item('Marca',n.brand)+item('Origen',sourceLabel)+item('Recibido',formatDate(n.received_at))+'</div></section>'+
     '<section class="record-detail-section"><h3>Detalle</h3><div class="record-detail-description">'+esc(n.issue||'Sin detalle indicado')+'</div>'+
       (n.status==='No sale'?'<div class="record-detail-reason"><span>Motivo por el que no salió</span><strong>'+esc(n.management_reason||'Motivo no indicado')+'</strong></div>':'')+'</section>'+
-    (custom?'<section class="record-detail-section"><h3>Otros datos</h3><div class="record-detail-grid">'+custom+'</div></section>':'')+financeSection+
+    (custom?'<section class="record-detail-section"><h3>Otros datos</h3><div class="record-detail-grid">'+custom+'</div></section>':'')+
     '<div class="modal-actions"><button class="primary-btn" type="button">Cerrar</button></div></div>';
   document.body.append(backdrop);
   $$('.close,.modal-actions .primary-btn',backdrop).forEach(button=>button.onclick=()=>backdrop.remove());
-  $('[data-open-finance-details]',backdrop)?.addEventListener('click',()=>{backdrop.remove();openFinanceDetails(n.id);});
-  $('[data-open-finance-payment]',backdrop)?.addEventListener('click',()=>{backdrop.remove();openFinancePayment(n.id);});
   backdrop.onclick=event=>{if(event.target===backdrop)backdrop.remove();};
 }
 function installPendingUi() {
   if(!$('#pendingUiStyles')) {
     const style=document.createElement('style');style.id='pendingUiStyles';
-    style.textContent='.notice-row-actions{display:flex;align-items:center;gap:5px;white-space:nowrap}.notice-row-actions .row-action{min-width:29px}.notice-row-actions .finance-quick-action{color:#4d5fe8;font-weight:800;background:#f0f2ff;border-color:#dce0ff}.notice-row-actions .notice-delete{color:#df2c0b;border-color:#f2c7bd;background:#fff7f5}.notice-row-actions .notice-delete:hover{background:#ffebe6;border-color:#e44820}.pending-status-actions .pending-delete{color:#c6281f;border-color:#f1c0ba;background:#fff7f5}.metric-clickable{cursor:pointer;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}.metric-pending{background:#fff0e9!important;border-color:#ef9b81!important;box-shadow:inset 4px 0 0 #e44820,0 5px 16px rgba(228,72,32,.09)!important}.metric-clickable:hover{transform:translateY(-2px);border-color:#f3c369;box-shadow:0 10px 26px rgba(28,42,69,.12)}.metric-clickable:focus-visible{outline:3px solid rgba(229,44,13,.35);outline-offset:3px}.pending-modal{width:min(760px,calc(100vw - 28px));max-height:calc(100vh - 36px);overflow:auto}.pending-modal .modal-head{align-items:flex-start}.pending-modal .modal-head p{margin:5px 0 0;color:#7d8798;font-size:12px}.pending-list{display:grid;gap:9px;margin:14px 0}.pending-item{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;padding:13px 15px;background:#fff;border:1px solid #e5e9f1;border-radius:11px;color:#17243a;cursor:pointer;transition:border-color .15s,background .15s,transform .15s}.pending-item:hover,.pending-item:focus-visible{border-color:#e44820;background:#fffaf8;transform:translateY(-1px);outline:none}.pending-item-main{display:grid;gap:4px;min-width:0}.pending-item-main strong{font-size:13px}.pending-item-main span{font-size:12px;color:#4e5d73}.pending-item-main small{font-size:10px;color:#8490a2}.pending-item-action{display:flex;align-items:center;gap:8px;color:#df2c0b;font-size:12px;font-weight:700;white-space:nowrap}.pending-item-action b{font-size:20px}.pending-hint{margin:12px 0 0;color:#7d8798;font-size:11px}.pending-empty{padding:32px 12px;display:grid;gap:7px;text-align:center;color:#7d8798;font-size:12px}.pending-empty strong{color:#18243a;font-size:16px}.pending-back{border:0;background:none;color:#df2c0b;font-family:inherit;font-size:12px;font-weight:600;padding:0;margin:0 0 14px;cursor:pointer}.pending-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.pending-detail-item{min-width:0;border:1px solid #e7eaf0;border-radius:9px;padding:10px 11px;display:grid;gap:5px;background:#fbfcfe}.pending-detail-item span{font-size:10px;color:#8490a2;text-transform:uppercase;letter-spacing:.04em}.pending-detail-item strong{font-size:13px;color:#202d43;white-space:pre-wrap;overflow-wrap:anywhere}.pending-detail-item.wide{grid-column:1/-1}.pending-status-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:18px;flex-wrap:wrap}.pending-status-actions button:disabled{opacity:.55;cursor:not-allowed}@media(max-width:560px){.pending-detail-grid{grid-template-columns:1fr}.pending-item{align-items:flex-start;flex-direction:column}.pending-item-action{align-self:flex-end}.pending-status-actions button{flex:1}}';
+    style.textContent='.notice-row-actions{display:flex;align-items:center;gap:5px;white-space:nowrap}.notice-row-actions .row-action{min-width:29px}.notice-row-actions .notice-delete{color:#df2c0b;border-color:#f2c7bd;background:#fff7f5}.notice-row-actions .notice-delete:hover{background:#ffebe6;border-color:#e44820}.pending-status-actions .pending-delete{color:#c6281f;border-color:#f1c0ba;background:#fff7f5}.metric-clickable{cursor:pointer;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}.metric-pending{background:#fff0e9!important;border-color:#ef9b81!important;box-shadow:inset 4px 0 0 #e44820,0 5px 16px rgba(228,72,32,.09)!important}.metric-clickable:hover{transform:translateY(-2px);border-color:#f3c369;box-shadow:0 10px 26px rgba(28,42,69,.12)}.metric-clickable:focus-visible{outline:3px solid rgba(229,44,13,.35);outline-offset:3px}.pending-modal{width:min(760px,calc(100vw - 28px));max-height:calc(100vh - 36px);overflow:auto}.pending-modal .modal-head{align-items:flex-start}.pending-modal .modal-head p{margin:5px 0 0;color:#7d8798;font-size:12px}.pending-list{display:grid;gap:9px;margin:14px 0}.pending-item{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;padding:13px 15px;background:#fff;border:1px solid #e5e9f1;border-radius:11px;color:#17243a;cursor:pointer;transition:border-color .15s,background .15s,transform .15s}.pending-item:hover,.pending-item:focus-visible{border-color:#e44820;background:#fffaf8;transform:translateY(-1px);outline:none}.pending-item-main{display:grid;gap:4px;min-width:0}.pending-item-main strong{font-size:13px}.pending-item-main span{font-size:12px;color:#4e5d73}.pending-item-main small{font-size:10px;color:#8490a2}.pending-item-action{display:flex;align-items:center;gap:8px;color:#df2c0b;font-size:12px;font-weight:700;white-space:nowrap}.pending-item-action b{font-size:20px}.pending-hint{margin:12px 0 0;color:#7d8798;font-size:11px}.pending-empty{padding:32px 12px;display:grid;gap:7px;text-align:center;color:#7d8798;font-size:12px}.pending-empty strong{color:#18243a;font-size:16px}.pending-back{border:0;background:none;color:#df2c0b;font-family:inherit;font-size:12px;font-weight:600;padding:0;margin:0 0 14px;cursor:pointer}.pending-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.pending-detail-item{min-width:0;border:1px solid #e7eaf0;border-radius:9px;padding:10px 11px;display:grid;gap:5px;background:#fbfcfe}.pending-detail-item span{font-size:10px;color:#8490a2;text-transform:uppercase;letter-spacing:.04em}.pending-detail-item strong{font-size:13px;color:#202d43;white-space:pre-wrap;overflow-wrap:anywhere}.pending-detail-item.wide{grid-column:1/-1}.pending-status-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:18px;flex-wrap:wrap}.pending-status-actions button:disabled{opacity:.55;cursor:not-allowed}@media(max-width:560px){.pending-detail-grid{grid-template-columns:1fr}.pending-item{align-items:flex-start;flex-direction:column}.pending-item-action{align-self:flex-end}.pending-status-actions button{flex:1}}';
     document.head.append(style);
   }
   const metricActions=[['mTotal','all','Consultar avisos recibidos'],['mNew','Nuevo','Consultar avisos nuevos'],['mPending','Pendiente de localizar','Consultar pendientes de localizar'],['mSold','Sale','Consultar avisos sacados'],['mLost','No sale','Consultar avisos no sacados']];
@@ -1221,7 +1204,6 @@ async function createNotice(event) {
   if(type!=='aviso')custom_fields[addressConfig?.field_key||'address']=v('fAddress')||null;
   const category=categoryFor(device);
   const row={company_id:currentCompany.id,landing_id:null,notice_type:type,status:v('fStatus')||'Nuevo',customer_name:v('fName'),phone:v('fPhone'),email:$('#fEmail')?.value?.trim()||null,locality:v('fLocality')||null,postal_code:v('fPostal')||null,device:device||null,category:isPhoneNotice?category:null,brand:isPhoneNotice?(v('fBrand')||null):null,issue:v('fIssue')||null,custom_fields,unit_price:0,management_reason:managementReason,created_by:user.id};
-  if(row.status==='Sale'&&currentCompany?.show_work_finance)row.work_completed_at=financeToday();
   if(!isPhoneNotice&&relatedNoticeMatch)row.related_notice_id=relatedNoticeMatch.id;
   if(row.status==='Sale'&&isPhoneNotice)row.unit_price=Number(tariffForNotice(row)?.price||0);
   submitButtons.forEach(button=>button.disabled=true);$('#saveNotice').textContent='Guardando…';
@@ -1231,7 +1213,7 @@ async function createNotice(event) {
   const {data,error}=saved;
   if(error){submitButtons.forEach(button=>button.disabled=false);updateRecordSubmitLabel();toast(errorText(error),'No se pudo guardar el aviso');return;}
   submitButtons.forEach(button=>button.disabled=false);updateRecordSubmitLabel();
-  notices.unshift(data);relatedNoticeMatch=null;$('#modal').classList.remove('open');event.target.reset();renderRows();renderComplaints();renderClientHistory();renderFinance();
+  notices.unshift(data);relatedNoticeMatch=null;$('#modal').classList.remove('open');event.target.reset();renderRows();renderComplaints();renderClientHistory();
   if(type!=='aviso'&&data.status==='Sale')await sendNoticeToConfiguredIntegrations(data);
   else if(type!=='aviso')toast('Se ha guardado sin enviar: cliente equivocado o llamada ajena a la empresa.','Registro guardado');
   else if(data.status==='Sale')await sendNoticeToConfiguredIntegrations(data);
@@ -1308,7 +1290,7 @@ async function addCompany() {
 }
 async function openCompanyDetails(companyId) {
   const company=companies.find(c=>c.id===companyId);if(!company)return;
-  const answer=await formDialog({title:'Datos de la empresa',description:'Consulta los datos generales y elige qué bloques de informes y cobros usa esta empresa.',fields:[
+  const answer=await formDialog({title:'Datos de la empresa',description:'Consulta los datos generales y elige qué informes usa esta empresa.',fields:[
     {key:'name',label:'Nombre de la empresa',value:company.name,required:true},
     {key:'administrator_name',label:'Administrador o representante',value:company.administrator_name||''},
     {key:'tax_id',label:'CIF / NIF',value:company.tax_id||''},
@@ -1363,7 +1345,7 @@ function renderCompanyPage() {
     card.style.display='grid';card.style.gap='12px';
     const controls=document.createElement('div');controls.className='company-admin-controls';
     controls.style.cssText='display:grid;gap:8px;padding-top:11px;border-top:1px solid var(--line)';
-    controls.innerHTML='<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#526077"><input type="checkbox" data-company-module="show_tariff_reports" '+(company.show_tariff_reports!==false?'checked':'')+'/> Informes con tarifas fijas</label><label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#526077"><input type="checkbox" data-company-module="show_work_finance" '+(company.show_work_finance===true?'checked':'')+'/> Facturación y cobros por trabajo</label><div style="display:flex;gap:7px;flex-wrap:wrap"><button class="outline-btn" type="button" data-company-open-page="usuarios">Usuarios y permisos</button><button class="outline-btn" type="button" data-company-open-page="personalizacion">Personalización</button><button class="outline-btn" type="button" data-company-open-page="configuracion">Configuración</button><button class="outline-btn" type="button" data-company-open-page="integraciones">Integraciones</button></div>';
+    controls.innerHTML='<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#526077"><input type="checkbox" data-company-module="show_tariff_reports" '+(company.show_tariff_reports!==false?'checked':'')+'/> Informes con tarifas fijas</label><div style="display:flex;gap:7px;flex-wrap:wrap"><button class="outline-btn" type="button" data-company-open-page="usuarios">Usuarios y permisos</button><button class="outline-btn" type="button" data-company-open-page="personalizacion">Personalización</button><button class="outline-btn" type="button" data-company-open-page="configuracion">Configuración</button><button class="outline-btn" type="button" data-company-open-page="integraciones">Integraciones</button></div>';
     card.append(controls);
     controls.querySelectorAll('[data-company-module]').forEach(input=>input.addEventListener('change',async()=>{
       const key=input.dataset.companyModule,previous=!!company[key];input.disabled=true;
@@ -1919,18 +1901,13 @@ function collapseSettingsPanels() {
 }
 function showPage(name) {
   if(name!=='configuracion')collapseSettingsPanels();
-  if(name==='cobros'&&!companyHasWorkFinance()){
-    toast('Activa «Facturación y cobros por trabajo» desde Superadministración.','Bloque desactivado');
-    if(isSuperAdmin)showPage('empresas');
-    return;
-  }
-  if(!isSuperAdmin&&!['avisos-landing','avisos-phone','informes','reclamaciones','anulaciones','historial','agenda','cobros'].includes(name))return;
+    if(!isSuperAdmin&&!['avisos-landing','avisos-phone','informes','reclamaciones','anulaciones','historial','agenda'].includes(name))return;
   closeMobileMore(false);
   const pageName=(name==='avisos-landing'||name==='avisos-phone')?'avisos':name;
   $$('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+pageName));
   $$('.nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
   document.querySelectorAll('#mobileNav [data-page],#mobileMorePanel [data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===name));
-  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',cobros:'Facturación y cobros',empresas:'Superadministración',reclamaciones:'Reclamaciones',anulaciones:'Anulaciones',historial:'Historial de clientes',agenda:'Agenda - Citas',usuarios:'Usuarios y permisos',personalizacion:'Personalización',configuracion:'Configuración',integraciones:'Integraciones'};
+  const labels={'avisos-landing':'Avisos por formulario','avisos-phone':'Avisos por teléfono',informes:'Informes',empresas:'Superadministración',reclamaciones:'Reclamaciones',anulaciones:'Anulaciones',historial:'Historial de clientes',agenda:'Agenda - Citas',usuarios:'Usuarios y permisos',personalizacion:'Personalización',configuracion:'Configuración',integraciones:'Integraciones'};
   $('#breadcrumb').textContent='Panel / '+labels[name];
   if(pageName==='avisos'){
     noticeSource=name==='avisos-phone'?'phone':'landing';
@@ -1952,7 +1929,6 @@ function showPage(name) {
     renderClientHistory();
   }
   if(pageName==='agenda')renderAgenda();
-  if(pageName==='cobros')renderFinance();
   $('#sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'smooth'});
 }
 let mobileMoreScrollY=0;
@@ -1981,7 +1957,6 @@ function closeMobileMore(restoreScroll=true) {
 }
 function wireUI() {
   installPendingUi();
-  wireFinance();
   document.querySelectorAll('#page-configuracion [data-settings-collapse]').forEach(button=>button.addEventListener('click',()=>{const body=document.getElementById(button.getAttribute('aria-controls'));if(!body)return;body.hidden=!body.hidden;button.textContent=body.hidden?'Mostrar':'Ocultar';button.setAttribute('aria-expanded',String(!body.hidden));}));
   $('#sidebar').addEventListener('click',event=>{const button=event.target.closest('button[data-page]');if(button){event.preventDefault();showPage(button.dataset.page);}});
   setupDate('main');setupDate('report');
