@@ -1,9 +1,7 @@
 const ADMIN_PORTAL=location.pathname.endsWith('/admin.html');
 const CFG = window.CRM_SUPABASE_CONFIG || {};
 const hasBackend = !!(CFG.url && CFG.publishableKey && window.supabase?.createClient);
-const projectRef = (()=>{try{return new URL(CFG.url).hostname.split('.')[0];}catch(_){return '';}})();
-if(projectRef)try{localStorage.removeItem(`sb-${projectRef}-auth-token`);}catch(_){}
-const db = hasBackend ? window.supabase.createClient(CFG.url, CFG.publishableKey, {auth:{persistSession:false,autoRefreshToken:true,detectSessionInUrl:false}}) : null;
+const db = hasBackend ? window.supabase.createClient(CFG.url, CFG.publishableKey, {auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}}) : null;
 const $ = (s, root=document) => root.querySelector(s);
 const $$ = (s, root=document) => [...root.querySelectorAll(s)];
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -221,7 +219,7 @@ async function loadMembershipsOnce() {
   const {data:rows,error:companyError}=isSuperAdmin?await companyQuery:await companyQuery.in('id',ids);
   if(companyError)throw companyError;
   companies=Array.isArray(rows)?rows:[];
-  if(ADMIN_PORTAL&&isSuperAdmin){currentCompany=null;$('#authScreen')?.remove();mountSignOut();renderCompanyPicker();renderCompanyPage();showPage('empresas');return;}
+  if(ADMIN_PORTAL&&isSuperAdmin){$('#authScreen')?.remove();mountSignOut();if(typeof restoreAdminOperatingContext==='function'&&await restoreAdminOperatingContext())return;currentCompany=null;renderCompanyPicker();renderCompanyPage();showPage('empresas');return;}
   if(!companies.length){
     currentCompany=null;
     if(!isSuperAdmin){showOnboarding();return;}
