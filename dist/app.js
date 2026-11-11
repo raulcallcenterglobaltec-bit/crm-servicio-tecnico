@@ -198,7 +198,11 @@ function mountSignOut() {
   userMeta.querySelector('span').textContent=isSuperAdmin?'Superadministrador':(members.find(m=>m.user_id===user?.id)?.role==='consulta'?'Consulta':'Gestor');
   if(!$('#signOut')) { const b=document.createElement('button');b.id='signOut';b.className='signout-btn';b.textContent='Salir';$('.top-actions').append(b);b.addEventListener('click',async()=>{await db.auth.signOut();location.reload();}); }
 }
-function rememberCompanySelection(company=currentCompany) {\n  if(!user?.id||!company?.id)return;\n  try{localStorage.setItem(`crm-service-selected-company:${user.id}`,company.id);}catch(_){}\n}\nasync function loadMembershipsOnce() {
+function rememberCompanySelection(company=currentCompany) {
+  if(!user?.id||!company?.id)return;
+  try{localStorage.setItem(`crm-service-selected-company:${user.id}`,company.id);}catch(_){}
+}
+async function loadMembershipsOnce() {
   membershipLoadStage='comprobando el perfil';
   const {data:globalRole,error:globalRoleError}=await db.rpc('is_super_admin');
   if(globalRoleError)throw globalRoleError;
@@ -224,7 +228,9 @@ function rememberCompanySelection(company=currentCompany) {\n  if(!user?.id||!co
     $('#authScreen')?.remove();mountSignOut();renderCompanyPicker();renderCompanyPage();showPage('empresas');return;
   }
   membershipLoadStage='preparando la empresa seleccionada';
-  let rememberedCompanyId=null;try{rememberedCompanyId=localStorage.getItem(`crm-service-selected-company:${user.id}`);}catch(_){}\n  currentCompany=companies.find(c=>c.id===currentCompany?.id)||companies.find(c=>c.id===rememberedCompanyId)||companies[0];\n  rememberCompanySelection();
+  let rememberedCompanyId=null;try{rememberedCompanyId=localStorage.getItem(`crm-service-selected-company:${user.id}`);}catch(_){}
+  currentCompany=companies.find(c=>c.id===currentCompany?.id)||companies.find(c=>c.id===rememberedCompanyId)||companies[0];
+  rememberCompanySelection();
   $('#authScreen')?.remove();
   membershipLoadStage='montando cabecera de usuario';mountSignOut();
   membershipLoadStage='dibujando selector de empresa';renderCompanyPicker();
