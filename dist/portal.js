@@ -19,6 +19,27 @@ applyCompanyModules=function(){
  const mobile=document.querySelector('#mobileNav');if(mobile)mobile.hidden=ADMIN_PORTAL&&!adminOperatingCompany;
  if(ADMIN_PORTAL){document.querySelectorAll('.sidebar [data-admin-only]').forEach(el=>el.hidden=adminOperatingCompany);document.querySelectorAll('[data-page]').forEach(el=>{if(['empresas','usuarios','personalizacion','configuracion','integraciones'].includes(el.dataset.page))el.hidden=adminOperatingCompany;});}
 };
+function adminOperatingCompanyKey(){return user?.id?'crm-service-admin-company:'+user.id:null;}
+function adminOperatingPageKey(){return user?.id?'crm-service-admin-page:'+user.id:null;}
+function saveAdminOperatingContext(page){
+ const companyKey=adminOperatingCompanyKey(),pageKey=adminOperatingPageKey();
+ if(!companyKey||!currentCompany?.id)return;
+ try{localStorage.setItem(companyKey,currentCompany.id);if(page&&pageKey)localStorage.setItem(pageKey,page);}catch(_){}
+}
+async function restoreAdminOperatingContext(){
+ if(!ADMIN_PORTAL||!isSuperAdmin||!user?.id)return false;
+ let companyId='',savedPage='';
+ try{companyId=localStorage.getItem(adminOperatingCompanyKey())||'';savedPage=localStorage.getItem(adminOperatingPageKey())||'';}catch(_){return false;}
+ const company=companies.find(item=>item.id===companyId);if(!company)return false;
+ adminOperatingCompany=true;currentCompany=company;
+ await loadCompanyData();applyAccessPermissions();applyCompanyModules();renderCompanyPicker();
+ const saved=MODULE_CATALOG.find(([key])=>key===savedPage&&tenantModuleEnabled(key));
+ const first=saved||MODULE_CATALOG.find(([key])=>tenantModuleEnabled(key));
+ if(first)showPage(first[0]);
+ else if(companyHasWorkFinance())showPage('cobros');
+ else{adminOperatingCompany=false;return false;}
+ return true;
+}
 const originalShowPage=showPage;
 showPage=function(name){
  const operational=MODULE_CATALOG.some(m=>m[0]===name)||name==='cobros';
@@ -27,6 +48,7 @@ showPage=function(name){
  if(ADMIN_PORTAL&&adminOperatingCompany&&name==='cobros'&&!companyHasWorkFinance()){toast('La facturación y los cobros por trabajo están desactivados para esta empresa.','Bloque desactivado');return;}
  if(!ADMIN_PORTAL&&operational&&!tenantModuleEnabled(name)){toast('Este bloque no está habilitado para tu empresa.');return;}
  originalShowPage(name);
+ if(ADMIN_PORTAL&&adminOperatingCompany&&operational)saveAdminOperatingContext(name);
  if(ADMIN_PORTAL){
   document.title=adminOperatingCompany&&currentCompany?currentCompany.name+' · CRM Gestión de avisos':'Superadministración · CRM Gestión de avisos';
   const head=document.querySelector('.page.active .page-head');
@@ -64,7 +86,7 @@ renderCompanyPage=function(){
   });
   card.append(box);
   const enter=document.createElement('button');enter.type='button';enter.className='primary-btn';enter.textContent='Entrar en esta empresa';enter.style.cssText='margin-top:4px;width:max-content;max-width:100%';
-  enter.onclick=async()=>{adminOperatingCompany=true;currentCompany=company;await loadCompanyData();applyAccessPermissions();applyCompanyModules();renderCompanyPicker();const first=MODULE_CATALOG.find(item=>tenantModuleEnabled(item[0]));if(first)showPage(first[0]);else if(companyHasWorkFinance())showPage('cobros');else{adminOperatingCompany=false;renderCompanyPicker();showPage('empresas');toast('Esta empresa todavía no tiene bloques habilitados.','Sin bloques activos');}};
+  enter.onclick=async()=>{adminOperatingCompany=true;currentCompany=company;saveAdminOperatingContext();await loadCompanyData();applyAccessPermissions();applyCompanyModules();renderCompanyPicker();const first=MODULE_CATALOG.find(item=>tenantModuleEnabled(item[0]));if(first)showPage(first[0]);else if(companyHasWorkFinance())showPage('cobros');else{adminOperatingCompany=false;renderCompanyPicker();showPage('empresas');toast('Esta empresa todavía no tiene bloques habilitados.','Sin bloques activos');}};
   card.insertBefore(enter,card.children[1]||null);
  });
 };
@@ -123,6 +145,7 @@ renderReport=function(){
 };
 
 function returnToSuperadminPanel(){
+ try{const companyKey=adminOperatingCompanyKey(),pageKey=adminOperatingPageKey();if(companyKey)localStorage.removeItem(companyKey);if(pageKey)localStorage.removeItem(pageKey);}catch(_){}
  adminOperatingCompany=false;currentCompany=null;
  applyAccessPermissions();applyCompanyModules();renderCompanyPicker();renderCompanyPage();showPage('empresas');renderCompanyPicker();
 }
