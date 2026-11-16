@@ -815,7 +815,7 @@ function pendingDetailRow(label,value,wide) {
   return '<div class="pending-detail-item'+(wide?' wide':'')+'"><span>'+esc(label)+'</span><strong>'+esc(value||'—')+'</strong></div>';
 }
 function openPendingNotices(status='Nuevo') {
-  $('.pending-modal-backdrop')?.remove();
+  if($('.pending-modal-backdrop'))return;
   const titles={all:'Avisos recibidos',Nuevo:'Avisos nuevos','Pendiente de localizar':'Pendiente de localizar',Sale:'Avisos sacados','No sale':'Avisos no sacados'};
   const title=titles[status]||titles.Nuevo;
   const backdrop=document.createElement('div');backdrop.className='modal-backdrop open pending-modal-backdrop';
