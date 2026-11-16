@@ -830,6 +830,7 @@ function openPendingNotices(status='Nuevo') {
   const host=$('.pending-content',backdrop);
     host.addEventListener('click',async e=>{
     e.stopPropagation();
+    if(e.target.closest('.pending-detail-item'))return;
     const resultOption=e.target.closest('[data-pending-result-option]');
     if(resultOption){const value=canonicalNoticeStatus(resultOption.dataset.pendingResultOption);if(!value)return;backdrop.dataset.pendingResult=value;const label=$('[data-pending-result-label]',host);if(label)label.textContent=value==='Sale'?'Aviso sacado':value==='No sale'?'Aviso no sacado':value==='Pendiente de localizar'?'Pendiente de localizar':'Nuevo';const menu=$('[data-pending-result-menu]',host);if(menu)menu.hidden=true;const trigger=$('[data-pending-result-trigger]',host);if(trigger)trigger.setAttribute('aria-expanded','false');const schedule=$('[data-pending-schedule]',host);const currentNotice=notices.find(item=>item.id===backdrop.dataset.pendingNoticeId);if(schedule)schedule.hidden=!currentNotice?.created_by||value==='No sale';return;}
     const resultTrigger=e.target.closest('[data-pending-result-trigger]');
