@@ -860,7 +860,7 @@ function openPendingNotices(status='Nuevo') {
       const saved=await changeStatus(id,effectiveStatus,reason);
       if(saved){
         if(scheduleButton){close();toast('Aviso sacado. Puedes completar la cita.','Aviso actualizado');await openAppointmentDialog(null,{notice_id:id});}
-        else {toast(status==='Sale'?'Aviso marcado como sacado.':status==='No sale'?'Aviso marcado como no sacado.':status==='Pendiente de localizar'?'Aviso guardado como pendiente de localizar.':'Aviso guardado como nuevo.','Gestión actualizada');if(backdrop.isConnected)renderPendingNoticeDetail(backdrop,id);}
+        else {toast(status==='Sale'?'Aviso marcado como sacado.':status==='No sale'?'Aviso marcado como no sacado.':status==='Pendiente de localizar'?'Aviso guardado como pendiente de localizar.':'Aviso guardado como nuevo.','Gestión actualizada');close();}
       } else if(backdrop.isConnected)renderPendingNoticeDetail(backdrop,id);
       return;
     }
