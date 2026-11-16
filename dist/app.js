@@ -849,10 +849,8 @@ function openPendingNotices(status='Nuevo') {
       const effectiveStatus=scheduleButton?'Sale':status;
       let reason=null;
       if(status==='No sale'){
-        const filter=backdrop.dataset.pendingStatus||'Nuevo';
-        close();
         reason=await requestNoSaleReason(notice.management_reason||'');
-        if(reason===null){openPendingNotices(filter);const restored=$('.pending-modal-backdrop');if(restored)renderPendingNoticeDetail(restored,id);return;}
+        if(reason===null){if(backdrop.isConnected)renderPendingNoticeDetail(backdrop,id);return;}
       }
       host.querySelectorAll('button').forEach(button=>button.disabled=true);
       if(saveButton)saveButton.textContent='Guardando…';
@@ -860,17 +858,17 @@ function openPendingNotices(status='Nuevo') {
       const saved=await changeStatus(id,effectiveStatus,reason);
       if(saved){
         if(scheduleButton){close();toast('Aviso sacado. Puedes completar la cita.','Aviso actualizado');await openAppointmentDialog(null,{notice_id:id});}
-        else {toast(status==='Sale'?'Aviso marcado como sacado.':status==='No sale'?'Aviso marcado como no sacado.':status==='Pendiente de localizar'?'Aviso guardado como pendiente de localizar.':'Aviso guardado como nuevo.','Gestión actualizada');if(backdrop.isConnected){if((backdrop.dataset.pendingStatus||'Nuevo')==='Nuevo'&&effectiveStatus==='Sale'&&!pendingNoticeRows('Nuevo').length)close();else renderPendingNoticeList(backdrop);}}
+        else {toast(status==='Sale'?'Aviso marcado como sacado.':status==='No sale'?'Aviso marcado como no sacado.':status==='Pendiente de localizar'?'Aviso guardado como pendiente de localizar.':'Aviso guardado como nuevo.','Gestión actualizada');if(backdrop.isConnected)renderPendingNoticeDetail(backdrop,id);}
       } else if(backdrop.isConnected)renderPendingNoticeDetail(backdrop,id);
       return;
     }
     const action=e.target.closest('[data-pending-status]');
     if(action){
       const status=action.getAttribute('data-pending-status');let reason=null;
-      if(status==='No sale'){close();reason=await requestNoSaleReason(notices.find(item=>item.id===id)?.management_reason||'');if(reason===null)return;}
+      if(status==='No sale'){reason=await requestNoSaleReason(notices.find(item=>item.id===id)?.management_reason||'');if(reason===null){if(backdrop.isConnected)renderPendingNoticeDetail(backdrop,id);return;}}
       host.querySelectorAll('button').forEach(button=>button.disabled=true);action.textContent='Guardando…';
       const saved=await changeStatus(id,status,reason);
-      if(saved){toast(status==='Sale'?'Aviso marcado como sacado.':'Aviso marcado como no sacado.','Gestión actualizada');if(backdrop.isConnected){if((backdrop.dataset.pendingStatus||'Nuevo')==='Nuevo'&&status==='Sale'&&!pendingNoticeRows('Nuevo').length)close();else renderPendingNoticeList(backdrop);}}
+      if(saved){toast(status==='Sale'?'Aviso marcado como sacado.':'Aviso marcado como no sacado.','Gestión actualizada');if(backdrop.isConnected)renderPendingNoticeDetail(backdrop,id);}
       else if(backdrop.isConnected)renderPendingNoticeDetail(backdrop,id);
     }
   });
